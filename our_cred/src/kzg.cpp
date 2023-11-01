@@ -4,7 +4,6 @@
 #include <libff/common/profiling.hpp>
 #include <libff/algebra/fields/field_utils.hpp>
 #include <libff/common/utils.hpp>
-#include <libsnark/gadgetlib1/gadgets/hashes/sha256/sha256_gadget.hpp>
 #include "structs.hpp"
 #include "kzg.hpp"
 

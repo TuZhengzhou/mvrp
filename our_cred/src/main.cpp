@@ -63,8 +63,8 @@ int main(int argc,char *argv[]) {
   N = (1 << N_bit) + 1;
   CredSRS srs = CredSRS(N);
 
-  const string base_format = "/root/mvrp/our_cred/static/base/%s-N_%lu-D_%lu-num_%lu-bitlen_%lu.txt";
-  const string improved_format = "/root/mvrp/our_cred/static/improved/%s-N_%lu-D_%lu-num_%lu-bitlen_%lu.txt";
+  const string base_format = "/root/mvrp/static/base/%s-N_%lu-D_%lu-num_%lu-bitlen_%lu.txt";
+  const string improved_format = "/root/mvrp/static/improved/%s-N_%lu-D_%lu-num_%lu-bitlen_%lu.txt";
 
   /** N = 1 << 20, D = 2 << 19, bit_len from 2 << 1 to 2 << 8, num from 2 << 18 to 2 << 11 */
   size_t D_bit, i, j;
@@ -124,9 +124,9 @@ int main(int argc,char *argv[]) {
   printf("%s\n", ipa_record.c_str());
   printf("%s\n", improved_record.c_str());
 
-  string base_file = "/root/mvrp/our_cred/static/base.txt";
-  string ipa_file = "/root/mvrp/our_cred/static/ipa.txt";
-  string improved_file = "/root/mvrp/our_cred/static/improved.txt";
+  string base_file = "/root/mvrp/static/base.txt";
+  string ipa_file = "/root/mvrp/static/ipa.txt";
+  string improved_file = "/root/mvrp/static/improved.txt";
   write_file(base_file, base_record);
   write_file(ipa_file, ipa_record);
   write_file(improved_file, improved_record);

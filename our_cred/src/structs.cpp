@@ -4,8 +4,6 @@
 #include <sstream>
 #include <openssl/sha.h>
 #include "structs.hpp"
-#include "libsnark/gadgetlib1/gadgets/hashes/sha256/sha256_gadget.hpp"
-#include "libsnark/gadgetlib1/gadgets/hashes/sha256/sha256_components.hpp"
 
 using cred::G1;
 using cred::G2;
@@ -152,11 +150,6 @@ bool isPowerOfTwo(size_t n) {
   return (n & (n - 1)) == 0;
 }
 
-void bits_padding(libff::bit_vector& v) {
-  size_t remainder = v.size() % libsnark::SHA256_block_size;
-  v.resize(v.size() + libsnark::SHA256_block_size - remainder, true);
-}
-
 std::string hexToChar(const char c) {
     switch(tolower(c))
     {
@@ -210,27 +203,27 @@ Fr generate_random_sha256(const std::string& pre_image) {
   return libff::convert_bit_vector_to_field_element<Fr>(hash_bits);
 }
 
-libff::bit_vector generate_hash_bits(string& num_string) {
-  std::vector<size_t> v_int;
-  for (size_t i = 0; i < num_string.size(); i++) {
-    v_int.push_back((size_t)((size_t)num_string.at(i) - 48));
-  }
+// libff::bit_vector generate_hash_bits(string& num_string) {
+//   std::vector<size_t> v_int;
+//   for (size_t i = 0; i < num_string.size(); i++) {
+//     v_int.push_back((size_t)((size_t)num_string.at(i) - 48));
+//   }
 
-  const size_t repack = 1; //what is the use of this repack variable?
-  std::vector<Fr> v_fr = libff::pack_int_vector_into_field_element_vector<Fr>(v_int, repack);
-  libff::bit_vector v_bits_in = libff::convert_field_element_vector_to_bit_vector<Fr>(v_fr);
-  v_bits_in.resize(libsnark::SHA256_block_size);
-  libff::bit_vector v_bits_out = libsnark::sha256_two_to_one_hash_gadget<Fr>::get_hash(v_bits_in);
-  return v_bits_out;
-}
+//   const size_t repack = 1; //what is the use of this repack variable?
+//   std::vector<Fr> v_fr = libff::pack_int_vector_into_field_element_vector<Fr>(v_int, repack);
+//   libff::bit_vector v_bits_in = libff::convert_field_element_vector_to_bit_vector<Fr>(v_fr);
+//   v_bits_in.resize(libsnark::SHA256_block_size);
+//   libff::bit_vector v_bits_out = libsnark::sha256_two_to_one_hash_gadget<Fr>::get_hash(v_bits_in);
+//   return v_bits_out;
+// }
 
-Fr generate_random(string s) {
-  libff::bit_vector bits;
+// Fr generate_random(string s) {
+//   libff::bit_vector bits;
 
-  bits = generate_hash_bits(s);
-  bits.resize(Fr::num_bits, true);
-  return libff::convert_bit_vector_to_field_element<Fr>(bits);
-}
+//   bits = generate_hash_bits(s);
+//   bits.resize(Fr::num_bits, true);
+//   return libff::convert_bit_vector_to_field_element<Fr>(bits);
+// }
 
 // y = hash(A, K), z = hash(y)
 void generate_random_y_z(const G1 &A, const G1 &K, Fr &y, Fr &z) {

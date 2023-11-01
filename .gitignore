@@ -12,7 +12,7 @@ build
 .vscode
 .VSCodeCounter
 our_cred/py_tests/
-our_cred/static/
+static/
 
 *.*~
 *.a

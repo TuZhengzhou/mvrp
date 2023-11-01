@@ -6,12 +6,18 @@ endif (POLICY CMP0048)
 project(mvrp)
 SET(PROJECT_VERSION 1.2.3.4)
 
-set(CMAKE_BUILD_TYPE "Debug" )
-set(CMAKE_CXX_FLAGS_DEBUG "$ENV{CXXFLAGS} -O0 -Wall -g2 -ggdb")
-set(CMAKE_CXX_FLAGS_RELEASE "$ENV{CXXFLAGS} -O3 -Wall")
+add_definitions(
+  -DCURVE_BN128
+)
+if(${CURVE} STREQUAL "BN128")
+  add_definitions(
+    -DBN_SUPPORT_SNARK=1
+  )
+endif()
 
+set(CMAKE_BUILD_TYPE "Debug" )
+set(CMAKE_CXX_FLAGS_DEBUG "$ENV{CXXFLAGS} -O0 -Wall -Wendif-labels -g2 -ggdb")
+set(CMAKE_CXX_FLAGS_RELEASE "$ENV{CXXFLAGS} -O3 -Wall -Wendif-labels")
+
+add_subdirectory(depends)
 add_subdirectory(our_cred)
-# add_subdirectory(bulletproof)
-# add_subdirectory(libvectcom)
-add_subdirectory(libsnark)
-# add_subdirectory(depends)

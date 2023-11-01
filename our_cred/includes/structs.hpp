@@ -279,11 +279,9 @@ public:
 // 使用位运算判断是否只有一个位为1
 bool isPowerOfTwo(size_t n);
 
-void bits_padding(libff::bit_vector& v);
-
 Fr generate_random_sha256(const std::string& pre_image);
 
-Fr generate_random(string s);
+// Fr generate_random(string s);
 
 void generate_random_y_z(const G1 &A, const G1 &K, Fr &y, Fr &z);
 

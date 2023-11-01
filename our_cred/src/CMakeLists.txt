@@ -2,6 +2,10 @@ set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_BUILD_TYPE "Debug")
 # set(CMAKE_BUILD_TYPE "Release")
 
+if(CMAKE_BUILD_TYPE STREQUAL Debug)
+    ADD_DEFINITIONS(-DCRED_DEBUG)
+endif()
+
 find_package(OpenSSL REQUIRED)
 
 include_directories(/usr/include)
@@ -22,6 +26,8 @@ add_executable(
   prover.cpp
   verifier.cpp
   ipa.cpp
+  kzg.cpp
+  circuit_generator.cpp
 )
 
 target_link_libraries(
@@ -29,6 +35,7 @@ target_link_libraries(
 
   ff
   gmpxx
+  OpenSSL::Crypto
 )
 
 add_executable(
@@ -39,6 +46,8 @@ add_executable(
   prover.cpp
   verifier.cpp
   ipa.cpp
+  kzg.cpp
+  circuit_generator.cpp
 )
 
 target_link_libraries(
@@ -46,4 +55,5 @@ target_link_libraries(
 
   ff
   gmpxx
+  OpenSSL::Crypto
 )

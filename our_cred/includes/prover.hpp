@@ -24,32 +24,20 @@ public:
   size_t _N;    // _N = srs.N
   map<size_t, size_t> _part_sums; // sum_(i=1)^(j-1) n_i
 
-  // round 1
-  Fr _r_1, _r_2;
-  std::vector<Fr> _a_L, _a_R, _K_L, _K_R;
-  std::map<size_t, std::vector<Fr>> _ds;
-  G1 _A, _K;
-
-  // round 2
-  Fr t0_1, t0_2, t0_3;
-  Fr _y, _z, _t_0, _t_1, _t_2, _r_3, _r_4;
-  G1 _pi_tilde;
-  GT _T_1, _T_2;
-
-  // round 3
-  Fr _x, _t_tilde, _r_x, _mu;
-  std::vector<Fr> _l_bold, _r_bold;
-  G1 _P_G1;
+  std::vector<G1> _point_proofs;
 
   Prover() {};
-  Prover(const CredSRS srs, const SET S, const Ranges& ranges, const IPAProveSystem& ipa_sys);
+  Prover(const CredSRS& srs, const SET& S, const Ranges& ranges, const IPAProveSystem& ipa_sys);
 
-  CredProof prove();
+  CredProof prove(Agenda& agenda, const bool improved=true);
+  CredProof prove_base(Agenda& agenda);
+  CredProof prove_improved(Agenda& agenda);
   
 private:
-  const std::vector<Fr>& get_dj(size_t);
+  inline const G1& point_proof(size_t idx);
 
-  void commit_set();            // select random _r and generate commitment _C
+  void commit_set();              // select random _r and generate commitment _C
+  void point_proof_pre_compute(); // precompute pointproof for every set item
   bool t0_check(const Fr& two, const vector<Fr>& one_vec, const vector<Fr>& z_powers_0, const vector<Fr>& y_powers_1);
   bool easy_check(const std::vector<Fr>& z_exps); // 直接给元素值, 然后检查
 };

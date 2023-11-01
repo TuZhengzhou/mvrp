@@ -47,9 +47,9 @@ public:
 
   bool IpaMultiExpVerify(const IPAProof& pi, const std::vector<G1>& g_vec, const std::vector<G1>& h_vec);
 
-private:
-  Fr generate_random(const Fr& pre_random, const G1& L, const G1& R);
+  bool IpaMultiExpVerify(const IPAProof& pi, const G1& g, const G1& h);
 
+private:
   G1 ipa_hash(
     const std::vector<G1>& g_vec, const std::vector<G1>& h_vec, \
     const std::vector<Fr>& al_vec, const std::vector<Fr>& ar_vec, \
@@ -68,9 +68,19 @@ private:
     std::vector<Fr>::const_iterator bl_iter, std::vector<Fr>::const_iterator br_iter, \
     const Fr& c, const size_t n_apos
   );
+
+  G1 ipa_hash(
+    std::vector<G1>::const_iterator g_iter, std::vector<G1>::const_iterator h_iter, \
+    std::vector<Fr>::const_iterator a_iter, std::vector<Fr>::const_iterator b_iter, \
+    const Fr& c, const size_t n_apos, \
+    char mode_a = 'l', char mode_b = 'r'
+  );
+
+public:
+  static Fr generate_random(const Fr& pre_random, const G1& L, const G1& R);
 };
 
 bool IPAOneRecursionTest();
 bool IPATest(size_t n = 2);
-};
+}; // namespace cred
 #endif

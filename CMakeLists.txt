@@ -20,4 +20,4 @@ set(CMAKE_CXX_FLAGS_DEBUG "$ENV{CXXFLAGS} -O0 -Wall -Wendif-labels -g2 -ggdb")
 set(CMAKE_CXX_FLAGS_RELEASE "$ENV{CXXFLAGS} -O3 -Wall -Wendif-labels")
 
 add_subdirectory(depends)
-add_subdirectory(our_cred)
+add_subdirectory(mvrp)

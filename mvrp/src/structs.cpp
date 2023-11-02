@@ -505,7 +505,7 @@ void AgendaItem::print(long long& start_time, long long& start_cpu_time) {
 
   if (time_from_last != 0) {
       double parallelism_from_last = 1.0 * cpu_time_from_last / time_from_last;
-      printf("[%0.4fs x%0.2f]\n", time_from_last * 1e-9, parallelism_from_last);
+      printf("[%0.8fs x%0.2f]\n", time_from_last * 1e-9, parallelism_from_last);
   } else {
       printf("[             ]\n");
   }

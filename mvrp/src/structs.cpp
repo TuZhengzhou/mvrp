@@ -203,6 +203,53 @@ Fr generate_random_sha256(const std::string& pre_image) {
   return libff::convert_bit_vector_to_field_element<Fr>(hash_bits);
 }
 
+vector<Fr> generate_random_fr_vec(const vector<G1>& vec_1, const vector<G2>& vec_2, const vector<GT>& vec_T, const size_t out_len) {
+#ifdef CRED_DEBUG
+  assert(vec_1.size() > 0 && out_len > 0);
+#endif
+
+  std::string str;
+  vector<Fr>  ret(out_len);
+  std::stringstream ss;
+
+  for(auto g1: vec_1) {
+    str += g1.coord[2].toString(10);
+  }
+
+  ret[0] = generate_random_sha256(str);
+  for(size_t i = 1; i < out_len; i++) {
+    ss << ret[i-1].as_bigint();
+    ret[i] = generate_random_sha256(ss.str());
+  }
+
+  return ret;
+}
+
+vector<Fr> generate_random_fr_vec(const vector<Fr>& vec_fr, const vector<G1>& vec_1, const vector<G2>& vec_2, const vector<GT>& vec_T, const size_t out_len) {
+#ifdef CRED_DEBUG
+  assert((vec_fr.size() + vec_1.size()) > 0 && out_len > 0);
+#endif
+
+  std::string str;
+  vector<Fr>  ret(out_len);
+  std::stringstream ss;
+
+  for(auto fr: vec_fr) {
+    str += std::to_string(fr.as_ulong());
+  }
+
+  for(auto g1: vec_1) {
+    str += g1.coord[2].toString(10);
+  }
+
+  ret[0] = generate_random_sha256(str);
+  for(size_t i = 1; i < out_len; i++) {
+    ss << ret[i-1].as_bigint();
+    ret[i] = generate_random_sha256(ss.str());
+  }
+
+  return ret;
+}
 // libff::bit_vector generate_hash_bits(string& num_string) {
 //   std::vector<size_t> v_int;
 //   for (size_t i = 0; i < num_string.size(); i++) {
@@ -342,6 +389,37 @@ std::vector<Fr> vector_neg(const std::vector<Fr> &v) {
     ret[i] = zero - v[i];
   }
   return ret;
+}
+
+std::vector<Fr> vec_matrix_mult(const vector<Fr>& vec, const vector<vector<Fr>>& matrix, const bool vec_left) {
+  size_t rows = matrix.size();
+  size_t cols = matrix[0].size();
+  std::vector<Fr> result;  // 初始化结果向量为零向量
+  if (vec_left) {
+    // 向量在矩阵左侧
+#ifdef CRED_DEBUG
+    assert(vec.size() == matrix.size() && vec.size() > (size_t)0);
+#endif
+    result.resize(matrix[0].size());
+    for (size_t i = 0; i < cols; ++i) {
+      for (size_t j = 0; j < rows; ++j) {
+        result[i] = result[i] + vec[j] * matrix[j][i];
+      }
+    }
+  } else {
+    // 向量在矩阵右侧
+#ifdef CRED_DEBUG
+    assert(matrix.size() > (size_t)0 && vec.size() == matrix[0].size());
+#endif
+    result.resize(matrix.size());
+    for (size_t i = 0; i < rows; ++i) {
+      for (size_t j = 0; j < cols; ++j) {
+        result[i] = result[i] + matrix[i][j] * vec[j];
+      }
+    }
+  }
+
+  return result;
 }
 
 std::vector<Fr> vector_powers(const Fr &x, size_t max_exp, bool zero_exp) {

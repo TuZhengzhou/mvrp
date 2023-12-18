@@ -89,6 +89,10 @@ CircuitParaGenerator::CircuitParaGenerator(const size_t n, const size_t m) {
     W_L[m+i][i+1] = Fr::one();
     W_O[m+i][i]   = - Fr::one();
   }
+#ifdef CRED_DEBUG
+  assert(check());
+
+#endif
 }
 
 bool CircuitParaGenerator::check() {

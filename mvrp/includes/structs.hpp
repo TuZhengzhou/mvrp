@@ -276,12 +276,45 @@ public:
   }
 };
 
+class ProofCircuit {
+public:
+  // round 1
+  G1 _AI, _AO, _K;
+
+  // round 2
+  G1 _pi_tilde; // product_(j \in _I) pi_j
+  GT _T_1, _T_3, _T_4, _T_5, _T_6;
+
+  // round 3
+  Fr _mu;
+  Fr _theta_x;
+  Fr _t_tilde;  // t(x)
+  IPAProof _pi_ipa;   // 
+
+  // G1 _commit_fzy_1, _commit_fzy_2;
+  // G1 _commit_fzy, _commit_fg, _commit_fh;
+  // KZGProof _pi_kzg_fzy_1, _pi_kzg_fzy_2;
+  // KZGProof _pi_kzg_fzy;
+  // KZGProof _pi_kzg_fg;
+  // KZGProof _pi_kzg_fh;
+
+  inline const size_t size_base() const {
+    return 3 * sizeof(Fr) + 5 * sizeof(GT) + 4 * sizeof(G1) + _pi_ipa.size();
+  }
+  // inline const size_t size_improved() const {
+  //   return size_base() + 3 * sizeof(G1) + 3 * 2 * sizeof(G1); // 3 commitments, 3 times (2 G1 in a kzg proof)
+  // }
+};
+
 // 使用位运算判断是否只有一个位为1
 bool isPowerOfTwo(size_t n);
 
 Fr generate_random_sha256(const std::string& pre_image);
 
 // Fr generate_random(string s);
+vector<Fr> generate_random_fr_vec(const vector<G1>& vec_1, const vector<G2>& vec_2, const vector<GT>& vec_T, const size_t out_len);
+
+vector<Fr> generate_random_fr_vec(const vector<Fr>& vec_fr, const vector<G1>& vec_1, const vector<G2>& vec_2, const vector<GT>& vec_T, const size_t out_len);
 
 void generate_random_y_z(const G1 &A, const G1 &K, Fr &y, Fr &z);
 
@@ -305,6 +338,8 @@ std::vector<Fr> vector_sub(const std::vector<Fr> &v1, const std::vector<Fr> &v2)
 std::vector<Fr> vector_neg(const std::vector<Fr> &v);
 
 std::vector<Fr> vector_powers(const Fr &x, size_t max_exp, bool zero_exp = true);
+
+std::vector<Fr> vec_matrix_mult(const vector<Fr>& vec, const vector<vector<Fr>>& matrx, const bool vec_left);
 
 template<typename T>
 T sum_up(const std::vector<T>& v) {

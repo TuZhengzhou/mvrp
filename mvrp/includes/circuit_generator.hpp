@@ -39,21 +39,22 @@
 #include "libff/algebra/curves/public_params.hpp"
 #include "libff/common/default_types/ec_pp.hpp"
 #include "structs.hpp"
+#include "linear_combination.hpp"
 
 using namespace std;
 
 namespace cred {
 
 class CircuitParaGenerator {
+private:
+  size_t num_constraints_;
 public:
-  size_t n;
-  size_t m;
+  size_t num_multi_gates_;
+  size_t num_commit_input_;
   vector<Fr> a_L, a_R, a_O;
   vector<Fr> v;
-  vector<vector<Fr>> W_L, W_R, W_O;
-  vector<vector<Fr>> W_V;
-  vector<Fr> c;
-  CircuitParaGenerator(const size_t n, const size_t m);
+  vector<LinearCombination> constraints;
+  CircuitParaGenerator(const size_t num_multi_gates, const size_t num_commit_input);
   bool check();
 };
 

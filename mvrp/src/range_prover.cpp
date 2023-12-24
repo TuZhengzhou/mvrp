@@ -3,11 +3,9 @@
 #include <map>
 #include <iostream>
 #include <iterator>
-#include "libff/common/utils.hpp"
-#include "libff/algebra/curves/public_params.hpp"
 #include "structs.hpp"
-#include "prover.hpp"
-#include "kzg.hpp"
+#include "range_prover.hpp"
+
 
 /*
   以向量为系数的多项式
@@ -29,13 +27,9 @@ namespace cred {
 void Prover::commit_set() {
   _r = Fr::random_element();
   _C = _r * this->_srs.get_g1_beta_exp(_N);  // item with index n havs exponent n+1
-  // _C = G1::zero();  // item with index n havs exponent n+1
   for(size_t i = 1; i <= _S.m; i++) {
     _C = _C + _S.get_set_value(i) * this->_srs.get_g1_beta_exp(i);
   }
-
-  // std::vector<Fr> exps = vector_powers(_srs.beta_powers[1], _S.m, false);
-  // assert(_C == inner_product(_S.set_values, exps) * this->_srs.g1_base_);
 }
 
 void Prover::point_proof_pre_compute() {
@@ -65,10 +59,10 @@ const G1& Prover::point_proof(size_t idx) {
 
 
 
-Prover::Prover(const CredSRS& srs, const SET& S, const Ranges& ranges, const IPAProveSystem& ipa_sys) {
-  _srs = CredSRS(srs);
-  _S = SET(S);
-  _ranges = Ranges(ranges);
+Prover::Prover(const CCredSRS& srs, const CSet& S, const CRanges& ranges, const IPAProveSystem& ipa_sys) {
+  _srs = CCredSRS(srs);
+  _S = CSet(S);
+  _ranges = CRanges(ranges);
   _ipa_prove_sys = ipa_sys;
 
   _N = _srs.N;
@@ -87,19 +81,25 @@ Prover::Prover(const CredSRS& srs, const SET& S, const Ranges& ranges, const IPA
   point_proof_pre_compute();
 }
 
-CredProof Prover::prove(Agenda& agenda, const bool improved) {
+CRangeProof Prover::prove(Agenda& agenda, const bool improved) {
   if(improved) 
     return prove_improved(agenda);
   return prove_base(agenda);
 }
 
-CredProof Prover::prove_base(Agenda& agenda) {
+CRangeProof Prover::prove_base(Agenda& agenda) {
 
   agenda.create_item("Prove_base");
   
-  CredProof pi; // global proof pi
+  CRangeProof pi; // global proof pi
   std::ostream_iterator<Fr>   outFr(cout, ", ");
   std::ostream_iterator<bool> outBo(cout, ", ");
+
+  vector<Fr> transcript_fr;
+  vector<G1> transcript_g1;
+  vector<G2> transcript_g2;
+  vector<GT> transcript_gt;
+  vector<Fr> random_challenges;
 
   // round 1
   Fr _r_1, _r_2;
@@ -228,7 +228,12 @@ CredProof Prover::prove_base(Agenda& agenda) {
 #endif
 
     /**  y, z ←$ hash([A]_1, [K]_1) **/
-    generate_random_y_z(pi._A, pi._K, _y, _z);
+    transcript_g1.push_back(pi._A);
+    transcript_g1.push_back(pi._K);
+    random_challenges = gen_random_field_elements_from_transcripts(transcript_g1, transcript_g2, transcript_gt, 2);
+    _y = random_challenges[0];
+    _z = random_challenges[1];
+
     z_powers_0 = vector_powers(_z, _S.m+2); // 1, z, z^2, ... , z^m, z^(m+1)
     y_powers_0 = vector_powers(_y, _D-1);
 
@@ -275,7 +280,7 @@ CredProof Prover::prove_base(Agenda& agenda) {
     _r_4 = Fr::random_element();
 
     /************************* T1, T2 ***********************/
-    // beta_N_plus_2_GT = ReducedPairing(this->_srs.get_g1_beta_exp(_N+2), this->_srs.g2_base_));
+    // beta_N_plus_2_GT = ReducedPairing(this->_srs.get_g1_beta_exp(_N+2), _srs.get_g2_beta_exp(0)));
   beta_N_plus_2_GT = ReducedPairing(this->_srs.get_g1_beta_exp(_N), this->_srs.get_g2_beta_exp(2));
 
     _T_1 = ((_srs.gt) ^ (_t_1)) * (beta_N_plus_2_GT ^ (_r_3));
@@ -316,7 +321,10 @@ CredProof Prover::prove_base(Agenda& agenda) {
 #endif
 
     /** x ←$ hash([pi_tilde]_1, [T1]_T, [T2]_T) **/
-    generate_random_x(pi._pi_tilde, pi._T_1, pi._T_2, _x);
+    transcript_g1.push_back(pi._pi_tilde);
+    transcript_gt.push_back(pi._T_1);
+    transcript_gt.push_back(pi._T_2);
+    _x = gen_random_field_elements_from_transcripts(transcript_g1, transcript_g2, transcript_gt, 1)[0];
 
     /** compute l(x), r(x), and t(x) **/
     _l_bold = vector_add(l_zero_term_coef, numerical_mult(_x, l_one_term_coef));
@@ -354,11 +362,6 @@ CredProof Prover::prove_base(Agenda& agenda) {
     pi._pi_ipa = pi_ipa;
   }
 
-#ifdef CRED_DEBUG
-  assert(t0_check(two, one_vec, z_powers_0, y_powers_0));
-  assert(easy_check(z_powers_0));
-  cout << "pass: assert(left == right_1 * right_2);" << endl;
-#endif
   agenda.mark_item_end("bullet::Round3");
   agenda.mark_item_end("Prove_base::Round3");
 
@@ -371,14 +374,20 @@ CredProof Prover::prove_base(Agenda& agenda) {
   return pi;
 };
 
-CredProof Prover::prove_improved(Agenda& agenda) {
+CRangeProof Prover::prove_improved(Agenda& agenda) {
 
   libff::enter_block("Prover::prove_improved()");
   agenda.create_item("Prove_improved");
 
-  CredProof pi; // global proof pi
+  CRangeProof pi; // global proof pi
   std::ostream_iterator<Fr>   outFr(cout, ", ");
   std::ostream_iterator<bool> outBo(cout, ", ");
+
+  vector<Fr> transcript_fr;
+  vector<G1> transcript_g1;
+  vector<G2> transcript_g2;
+  vector<GT> transcript_gt;
+  vector<Fr> random_challenges;
 
   // round 1
   Fr _r_1, _r_2;
@@ -492,8 +501,6 @@ CredProof Prover::prove_improved(Agenda& agenda) {
   std::vector<Fr> l_zero_term_coef, l_one_term_coef;  // coefs of l(x)
   std::vector<Fr> r_zero_term_coef, r_one_term_coef;  // coefs of r(x)
   GT beta_N_plus_2_GT;
-
-  // G1 point_proof;   // point proof of one item
   
   const bool round_2 = true;
   if(round_2) {
@@ -503,7 +510,12 @@ CredProof Prover::prove_improved(Agenda& agenda) {
 #endif
 
     /**  y, z ←$ hash([A]_1, [K]_1) **/
-    generate_random_y_z(pi._A, pi._K, _y, _z);
+    transcript_g1.push_back(pi._A);
+    transcript_g1.push_back(pi._K);
+    random_challenges = gen_random_field_elements_from_transcripts(transcript_g1, transcript_g2, transcript_gt, 2);
+    _y = random_challenges[0];
+    _z = random_challenges[1];
+
     z_powers_0 = vector_powers(_z, _S.m+2); // 1, z, z^2, ... , z^m, z^(m+1)
     y_powers_0 = vector_powers(_y, _D-1);
 
@@ -518,7 +530,6 @@ CredProof Prover::prove_improved(Agenda& agenda) {
     libff::enter_block("/** compute sum_z_pows_cdot_dj **/");
     sum_z_pows_cdot_dj = zero_vec;
     for(auto j: _ranges.get_indexs()) {
-      // sum_z_pows_cdot_dj = vector_add(sum_z_pows_cdot_dj, numerical_mult(z_powers_0[j+1], get_dj(j)));
       base = _ranges.get_part_sum(j);
       auto bit_len = _ranges.get_range(j).get_bit_len();
       auto two_exp = Fr::one();
@@ -548,7 +559,6 @@ CredProof Prover::prove_improved(Agenda& agenda) {
     _r_4 = Fr::random_element();
 
     /************************* T1, T2 ***********************/
-    // beta_N_plus_2_GT = ReducedPairing(this->_srs.get_g1_beta_exp(_N+2), this->_srs.g2_base_));
   beta_N_plus_2_GT = ReducedPairing(this->_srs.get_g1_beta_exp(_N), this->_srs.get_g2_beta_exp(2));
 
     _T_1 = ((_srs.gt) ^ (_t_1)) * (beta_N_plus_2_GT ^ (_r_3));
@@ -588,7 +598,10 @@ CredProof Prover::prove_improved(Agenda& agenda) {
 #endif
 
     /** x ←$ hash([pi_tilde]_1, [T1]_T, [T2]_T) **/
-    generate_random_x(pi._pi_tilde, pi._T_1, pi._T_2, _x);
+    transcript_g1.push_back(pi._pi_tilde);
+    transcript_gt.push_back(pi._T_1);
+    transcript_gt.push_back(pi._T_2);
+    _x = gen_random_field_elements_from_transcripts(transcript_g1, transcript_g2, transcript_gt, 1)[0];
 
     /** compute l(x), r(x), and t(x) **/
     _l_bold = vector_add(l_zero_term_coef, numerical_mult(_x, l_one_term_coef));
@@ -627,12 +640,6 @@ CredProof Prover::prove_improved(Agenda& agenda) {
     pi._pi_ipa = pi_ipa;
   }
 
-#ifdef CRED_DEBUG
-  assert(t0_check(two, one_vec, z_powers_0, y_powers_0));
-  assert(easy_check(z_powers_0));
-  cout << "pass: assert(left == right_1 * right_2);" << endl;
-#endif
-
 
 
 
@@ -665,8 +672,7 @@ CredProof Prover::prove_improved(Agenda& agenda) {
   r_apos = std::vector<Fr>(_D, _z * Fr::one());
   r_apos = vector_add(r_apos, sum_z_pow_dj);
 
-  poly_fzy_1 = poly_merge(l_apos, 0, std::vector<Fr>(), _D, _D-1);
-  poly_fzy_2 = poly_merge(r_apos, 0, std::vector<Fr>(), _D, _D-1);
+  poly_fzy = poly_merge(l_apos, 1, r_apos, _N + 2, _N + _D + 2);
 
   /** compute randomes used for inner-product-argument folding */
   size_t recursion_time;
@@ -693,37 +699,20 @@ CredProof Prover::prove_improved(Agenda& agenda) {
   agenda.mark_item_end("Prove::multi_exponentiation_n");
 
   std::vector<Fr> poly_fg, poly_fh;
-  poly_fg = poly_merge(ss, 0, std::vector<Fr>(), _D, _D-1);
-  poly_fh = poly_merge(hadmard_product(y_inv_powers_0, ss_inv), 0, std::vector<Fr>(), _D, _D-1); // fh = X^(N+2) * ()
+  
+  poly_fg = shift_and_reverse(ss, 1);
+  poly_fh = shift_and_reverse(hadmard_product(y_inv_powers_0, ss_inv), _N + 2);
+
 #ifdef CRED_DEBUG
-  assert(poly_fg.size() == _D);
-  assert(poly_fh.size() == _D);
+  assert(poly_fg.size() == _D + 1);
+  assert(poly_fh.size() == _N + _D + 2);
 #endif
 
-  agenda.create_item("Prove::fzy_1");
-  auto fzy_1 = kzg_prove(_srs, 1   , _D, poly_fzy_1, _srs.g1s.begin()   , _srs.g2s.begin());
-  agenda.mark_item_end("Prove::fzy_1");
-  agenda.create_item("Prove::fzy_2");
-  auto fzy_2 = kzg_prove(_srs, _N+2, _D, poly_fzy_2, _srs.g1s.begin()+_N, _srs.g2s.begin());
-  agenda.mark_item_end("Prove::fzy_2");
-  agenda.create_item("Prove::of_fg");
-  auto of_fg = kzg_prove(_srs, 1   , _D, poly_fg   , _srs.g1s.begin()   , _srs.g2s.begin());
-  agenda.mark_item_end("Prove::of_fg");
-  agenda.create_item("Prove::of_fh");
-  auto of_fh = kzg_prove(_srs, _N+2, _D, poly_fh   , _srs.g1s.begin()+_N, _srs.g2s.begin());
-  agenda.mark_item_end("Prove::of_fh");
-
-
-
-  pi._commit_fzy_1 = fzy_1.first;
-  pi._commit_fzy_2 = fzy_2.first;
-  pi._commit_fg = of_fg.first;
-  pi._commit_fh = of_fh.first;
-
-  pi._pi_kzg_fzy_1 = fzy_1.second;
-  pi._pi_kzg_fzy_2 = fzy_2.second;
-  pi._pi_kzg_fg = of_fg.second;
-  pi._pi_kzg_fh = of_fh.second;
+  agenda.create_item("Prove::kzg_prove");
+  pi._pi_kzg_fzy = kzg_prove(_srs, poly_fzy, poly_fzy.size(), pi._commit_fzy);
+  pi._pi_kzg_fg = kzg_prove(_srs, poly_fg, poly_fg.size(), pi._commit_fg);
+  pi._pi_kzg_fh = kzg_prove(_srs, poly_fh, poly_fh.size(), pi._commit_fh);
+  agenda.mark_item_end("Prove::kzg_prove");
 
 #ifdef CRED_DEBUG
   G1 g, h;
@@ -733,8 +722,8 @@ CredProof Prover::prove_improved(Agenda& agenda) {
     g = g + ss[i] * g_vec[i];
     h = h + ss[i].inverse() * h_vec[i];
   }
-  // assert(commit_fg == g);
-  // assert(commit_fh == h);
+  assert(pi._commit_fg == g);
+  assert(pi._commit_fh == h);
 
   G1 F;
   h_vec.clear();    // reset h_vec
@@ -746,7 +735,7 @@ CredProof Prover::prove_improved(Agenda& agenda) {
   for(size_t i = 0; i < _D; i++) {
     F = F + l_apos[i] * g_vec[i] + r_apos[i] * h_vec[i];
   }
-  assert(pi._commit_fzy_1 + pi._commit_fzy_2 == F);
+  assert(pi._commit_fzy == F);
 #endif
 
   libff::leave_block("Prover::prove_improved()");
@@ -757,50 +746,7 @@ CredProof Prover::prove_improved(Agenda& agenda) {
   agenda.mark_mem_usage("Prove_improved");
   agenda.mark_proof_size(pi);
 
-
   return pi;
-}
-
-bool Prover::t0_check(const Fr& two, const vector<Fr>& one_vec, const vector<Fr>& z_powers_0, const vector<Fr>& y_powers_0) {
-  // Fr sum_z_pows_dot_inner = Fr::zero();
-  // for(size_t j: _ranges.get_indexs()) {
-  //   Fr two_pow            = two ^ (_ranges.get_range(j).get_bit_len());
-  //   sum_z_pows_dot_inner += z_powers_0[j+2] * (two_pow - Fr::one());
-  // }
-
-  // // Fr t0_1, t0_2, t0_3;
-  // t0_1 = Fr::zero();
-  // for(size_t j: _ranges.get_indexs()) {
-  //   t0_1 += z_powers_0[j+1] * inner_product(_a_L, get_dj(j)) ;
-  // }
-  // t0_2 = (z_powers_0[1]-z_powers_0[2]) * inner_product(one_vec, y_powers_0);
-  // t0_3 = sum_z_pows_dot_inner;
-
-  // return _t_0 == t0_1 + t0_2 - t0_3;
-  return true;
-}
-
-/*
-  point proof 多元素聚合检查, 不考虑零知识性
-*/
-bool Prover::easy_check(const std::vector<Fr>& z_powers_0) {
-
-  // G2 sum_z_pows_beta_pows;
-  // sum_z_pows_beta_pows = G2::zero();
-  // for(size_t j: _ranges.get_indexs()) {
-  //   sum_z_pows_beta_pows = sum_z_pows_beta_pows + z_powers_0[1+j] * this->_srs.get_g2_beta_exp(_N + 1 - j);
-  // }
-
-  // GT left = ReducedPairing(_C, sum_z_pows_beta_pows);
-  // GT right_1 = ReducedPairing(_pi_tilde, this->_srs.g2_base_));
-  // Fr right_2_Fr = Fr::zero();
-  // for(size_t j: _ranges.get_indexs()) {
-  //   right_2_Fr += _S.get_set_value(j) * z_powers_0[j+1];
-  // }
-  // GT right_2 = _srs.gt ^ right_2_Fr;
-
-  // return left == right_1 * right_2;
-  return true;
 }
 
 };

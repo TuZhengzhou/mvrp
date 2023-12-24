@@ -4,14 +4,14 @@
 #include <libff/common/profiling.hpp>
 #include <libff/algebra/fields/field_utils.hpp>
 #include <libff/common/utils.hpp>
-#include "structs.hpp"
+#include "basic_types.hpp"
 #include "kzg.hpp"
 
 
 
 namespace cred {
 
-kzgCommitKey kzg_setup(const size_t t)
+CKzgKey kzg_setup(const size_t t)
 {
   libff::enter_block("Call to kzg_setup");
 
@@ -61,12 +61,12 @@ kzgCommitKey kzg_setup(const size_t t)
   /* Output as a commitment key */
   libff::leave_block("Call to kzg_setup");
 
-  kzgCommitKey tuple = kzgCommitKey(std::move(g1tuple), std::move(g2tuple));
+  CKzgKey tuple = CKzgKey(std::move(g1tuple), std::move(g2tuple));
   return tuple;
 
 }
 
-G1 kzg_commit(const kzgCommitKey &ck, const std::vector<Fr> &poly, const size_t t)
+G1 kzg_commit(const CKzgKey &ck, const std::vector<Fr> &poly, const size_t t)
 {
   libff::enter_block("Call to kzg_commit");
 
@@ -119,7 +119,7 @@ Fr kzg_hash(const G1 &commit)
   return random_point;
 }
 
-KZGProof kzg_prove(const kzgCommitKey &ck, std::vector<Fr> &poly, const Fr &point, const size_t t)
+CKzgProof kzg_prove(const CKzgKey &ck, std::vector<Fr> &poly, const Fr &point, size_t t)
 {
   libff::enter_block("Call to kzg_prove");
   size_t i;
@@ -127,13 +127,6 @@ KZGProof kzg_prove(const kzgCommitKey &ck, std::vector<Fr> &poly, const Fr &poin
   /* Evaluate Polynomial */
   libff::enter_block("Evaluate Polynomial");
 
-  // Fr eval = Fr::zero();
-  // Fr temp = Fr::one();
-
-  // for(i = 1; i < t + 1; i++) {
-  // eval += poly[t - i] * temp;
-  // temp *= point;
-  // }
   Fr eval = kzg_evaluate(poly, point, t);
 
   libff::leave_block("Evaluate Polynomial");
@@ -152,7 +145,7 @@ KZGProof kzg_prove(const kzgCommitKey &ck, std::vector<Fr> &poly, const Fr &poin
   // libff::enter_block("Divide Algorithm: poly(x) - poly(i) / (x - i)");
   std::vector<Fr> psi(t);
 
-   for(i = 0; i < t - 1; i++) {
+  for(i = 0; i < t - 1; i++) {
     psi[i] = poly[i];
     poly[i] = poly[i] - (psi[i] * divisor[0]);
     poly[i + 1] = poly[i + 1] - psi[i] * divisor[1];
@@ -184,8 +177,13 @@ KZGProof kzg_prove(const kzgCommitKey &ck, std::vector<Fr> &poly, const Fr &poin
   
   libff::leave_block("Call to kzg_prove");
 
-  /* Output as a KZGProof */
-  KZGProof wit = KZGProof(std::move(eval_g1), std::move(w1));
+  /* Output as a CKzgProof */
+  CKzgProof wit = CKzgProof(std::move(eval_g1), std::move(w1));
+  wit.psi.resize(t - 1);
+  for(i = 0; i < t - 1; i++) {
+    wit.psi[i] = psi[i] - poly[t - 1];
+  }
+
   return wit;
 }
 
@@ -199,29 +197,39 @@ KZGProof kzg_prove(const kzgCommitKey &ck, std::vector<Fr> &poly, const Fr &poin
  * exp_span 为 7(8-2+1)
 //  * poly 为 [2,0,0,0,0,0,6]
 */
-pair<G1, KZGProof> kzg_prove(CredSRS& srs, const size_t exp_start, const size_t exp_span, std::vector<Fr>& poly, vector<G1>::iterator g1s_iter, vector<G2>::iterator g2s_iter) {
+CKzgProof kzg_prove(const CCredSRS& srs, std::vector<Fr>& poly, size_t t, G1& commit) {
 #ifdef CRED_DEBUG
-  assert(poly.size() == exp_span);
+  assert(poly.size() == t);
 #endif
   std::vector<G1> g1tuple;
   std::vector<G2> g2tuple;
-  if(exp_start == 0){
-    g1tuple = {srs.g1_base_};
-  }
-  g2tuple = {srs.g2_base_};
-  g1tuple.insert(g1tuple.end(), g1s_iter, g1s_iter+exp_span);
-  g2tuple.insert(g2tuple.end(), g2s_iter, g2s_iter+(size_t)1);
+  g1tuple.insert(g1tuple.end(), srs.g1s.begin(), srs.g1s.begin() + t);
+  g2tuple.insert(g2tuple.end(), srs.g2s.begin(), srs.g2s.begin() + (size_t)1);
   
-  kzgCommitKey kzg_ck(g1tuple, g2tuple);
-  G1 commit;
+  CKzgKey kzg_ck(g1tuple, g2tuple);
+
   Fr random;
-  commit = kzg_commit(kzg_ck, poly, exp_span);
+  commit = kzg_commit(kzg_ck, poly, t);
   random = kzg_hash(commit);
   
-  KZGProof pi;
-  pi = kzg_prove(kzg_ck, poly, random, exp_span);
-  return pair<G1, KZGProof>(commit, pi);
+  CKzgProof pi;
+  pi = kzg_prove(kzg_ck, poly, random, t);
+
+  GT beta_N_plus_2_GT = ReducedPairing(srs.get_g1_beta_exp(srs.N), srs.get_g2_beta_exp(2));
+
+  if (pi.psi.size() > srs.N+1) {
+    Fr coef_exp_N_plus_one;
+    coef_exp_N_plus_one = pi.psi[pi.psi.size() - (srs.N+2)];
+    pi.wt = ((beta_N_plus_2_GT) ^ (coef_exp_N_plus_one)) * (((srs.gt) ^ (coef_exp_N_plus_one * random)).unitary_inverse());
+  } else {
+    pi.wt = (srs.gt) ^ (Fr::zero());
+  }
+  pi.psi.clear();
+
+  return pi;
 }
+
+
 
 Fr kzg_evaluate(const std::vector<Fr> &poly, const Fr &point, const size_t t)
 {
@@ -237,19 +245,18 @@ Fr kzg_evaluate(const std::vector<Fr> &poly, const Fr &point, const size_t t)
   return eval;
 }
 
-bool kzg_vfyeval(const kzgCommitKey& ck, const G1& commit, const KZGProof &KZGProof)
+bool kzg_vfyeval(const CKzgKey& ck, const G1& commit, const CKzgProof &CKzgProof)
 {
   libff::enter_block("Call to kzg_vfyeval");
   GT left1 = ReducedPairing(commit, ck.g2[0]); //either side does not matter.
   Fr zero = Fr::zero();
 
-  Fr num = zero - kzg_hash(commit);
-  G2 num2 = num * ck.g2[0];
+  G2 num = kzg_hash(commit) * ck.g2[0];
 
-  GT right1 = ReducedPairing(KZGProof.w1, num2 + ck.g2[1]);
-  GT right2 = ReducedPairing(KZGProof.eval, ck.g2[0]); //eval which side? doesnt matter.
+  GT right1 = ReducedPairing(CKzgProof.w1, ck.g2[1] - num);
+  GT right2 = ReducedPairing(CKzgProof.eval, ck.g2[0]); //eval which side? doesnt matter.
 
-  GT right = right1 * right2;
+  GT right = right1 * right2 * CKzgProof.wt;
   bool verifyresult;
   if (left1 == right) {
     verifyresult = true;
@@ -278,7 +285,7 @@ bool kzg_test() {
   /* Generate t-SDH tuple, and select secret randomness t */
 
   libff::print_header("Generate Key: t-SDH Tuple");
-  kzgCommitKey ck = kzg_setup(t);
+  CKzgKey ck = kzg_setup(t);
   printf("\n"); libff::print_indent(); libff::print_mem("after setup");
 
   /* Commit Polynomial into Product: G1-element */
@@ -295,8 +302,8 @@ bool kzg_test() {
   /* Generate Witness of the evaluation + Evaluate the Polynomial */
 
   libff::print_header("Create Witness");
-  KZGProof wit = kzg_prove(ck, poly, point, t);
-  printf("\n"); libff::print_indent(); libff::print_mem("after create-KZGProof");
+  CKzgProof wit = kzg_prove(ck, poly, point, t);
+  printf("\n"); libff::print_indent(); libff::print_mem("after create-CKzgProof");
 
   /* Verify evaluation */
   libff::print_header("Verify Evaluation of Polynomial");
@@ -318,4 +325,4 @@ bool kzg_test() {
   return verifyresult;
 }
 
-} // cred
+} // namespace cred

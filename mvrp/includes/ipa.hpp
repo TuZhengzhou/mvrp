@@ -7,12 +7,31 @@
 #include "libff/common/profiling.hpp"
 #include "libff/algebra/curves/public_params.hpp"
 #include "libff/common/default_types/ec_pp.hpp"
-#include "structs.hpp"
+#include "basic_types.hpp"
 
 
 using namespace std;
 
 namespace cred {
+
+class CIpaProof {
+public:
+  std::vector<G1> L_vec;
+  std::vector<G1> R_vec;
+  Fr a, b;
+
+  inline const size_t size() const {
+    return 2 * sizeof(Fr)+ 2 * L_vec.size() * sizeof(G1);
+  }
+};
+
+class CIpaProofOneRecursion {
+public:
+  G1 L;
+  G1 R;
+  std::vector<Fr> a_vec;
+  std::vector<Fr> b_vec;
+};
 
 class IPAProveSystem {
 public:
@@ -24,30 +43,29 @@ public:
   IPAProveSystem() {};
   IPAProveSystem(G1& u);
   IPAProveSystem(G1& P, G1& u, Fr& c);
-  G1 IPACommit();
   // IPAProveSystem() {};
 
 
-  IPAProofOneRecursion IpaProveOneRecursion(
+  CIpaProofOneRecursion IpaProveOneRecursion(
     const std::vector<G1>& g_vec, const std::vector<G1>& h_vec, \
     const std::vector<Fr>& a_vec, const std::vector<Fr>& b_vec, \
     const Fr& c
   );
 
   bool IpaVerifyOneRecursion(
-    const IPAProofOneRecursion& pi, const std::vector<G1>& g_vec, const std::vector<G1>& h_vec
+    const CIpaProofOneRecursion& pi, const std::vector<G1>& g_vec, const std::vector<G1>& h_vec
   );
 
 
-  IPAProof IpaProve(const std::vector<G1>& g_vec, const std::vector<G1>& h_vec, \
+  CIpaProof IpaProve(const std::vector<G1>& g_vec, const std::vector<G1>& h_vec, \
                     const std::vector<Fr>& a_vec, const std::vector<Fr>& b_vec, \
                     const Fr& c);
 
-  bool IpaVerify(const IPAProof& pi, const std::vector<G1>& g_vec, const std::vector<G1>& h_vec);
+  bool IpaVerify(const CIpaProof& pi, const std::vector<G1>& g_vec, const std::vector<G1>& h_vec);
 
-  bool IpaMultiExpVerify(const IPAProof& pi, const std::vector<G1>& g_vec, const std::vector<G1>& h_vec);
+  bool IpaMultiExpVerify(const CIpaProof& pi, const std::vector<G1>& g_vec, const std::vector<G1>& h_vec);
 
-  bool IpaMultiExpVerify(const IPAProof& pi, const G1& g, const G1& h);
+  bool IpaMultiExpVerify(const CIpaProof& pi, const G1& g, const G1& h);
 
 private:
   G1 ipa_hash(

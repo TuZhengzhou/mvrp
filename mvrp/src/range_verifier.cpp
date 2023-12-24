@@ -1,15 +1,13 @@
 #include "structs.hpp"
-#include "kzg.hpp"
-#include "prover.hpp"
-#include "verifier.hpp"
+#include "range_verifier.hpp"
 
 namespace cred {
 
 /************************** Verifier ***************************/
-Verifier::Verifier(const CredSRS& srs, const G1& C, const size_t& set_size, const Ranges& ranges, const IPAProveSystem& ipa_sys) {
-  _srs = CredSRS(srs);
+Verifier::Verifier(const CCredSRS& srs, const G1& C, const size_t& set_size, const CRanges& ranges, const IPAProveSystem& ipa_sys) {
+  _srs = CCredSRS(srs);
   _set_size = set_size;
-  _ranges = Ranges(ranges);
+  _ranges = CRanges(ranges);
   _ipa_prove_sys = ipa_sys;
 
   _N = _srs.N;
@@ -19,16 +17,22 @@ Verifier::Verifier(const CredSRS& srs, const G1& C, const size_t& set_size, cons
   _C = G1(C);
 }
 
-bool Verifier::verify(const CredProof& pi, Agenda& agenda, const bool improved) {
+bool Verifier::verify(const CRangeProof& pi, Agenda& agenda, const bool improved) {
   if(improved)
     return verify_improved(pi, agenda);
   return verify_base(pi, agenda);
 }
 
-bool Verifier::verify_base(const CredProof& pi, Agenda& agenda) {
+bool Verifier::verify_base(const CRangeProof& pi, Agenda& agenda) {
 
   bool result;
   agenda.create_item("Verify_base");
+
+  vector<Fr> transcript_fr;
+  vector<G1> transcript_g1;
+  vector<G2> transcript_g2;
+  vector<GT> transcript_gt;
+  vector<Fr> random_challenges;
 
   Fr _y, _z, _x;  // randoms used in interaction
   
@@ -50,7 +54,6 @@ bool Verifier::verify_base(const CredProof& pi, Agenda& agenda) {
   
   two = Fr::one() + Fr::one();
   one_vec = std::vector<Fr>(_D, Fr::one());
-  // beta_N_plus_2_GT = ReducedPairing(this->_srs.get_g1_beta_exp(_N+2), this->_srs.g2_base_));
   beta_N_plus_2_GT = ReducedPairing(this->_srs.get_g1_beta_exp(_N), this->_srs.get_g2_beta_exp(2));
 
   const bool pointproof_check = true;
@@ -61,8 +64,17 @@ bool Verifier::verify_base(const CredProof& pi, Agenda& agenda) {
 #endif
 
     /** re-compute random y,z,x, copute y_powers, z_powers **/
-    generate_random_y_z(pi._A, pi._K, _y, _z);
-    generate_random_x(pi._pi_tilde, pi._T_1, pi._T_2, _x);
+
+    transcript_g1.push_back(pi._A);
+    transcript_g1.push_back(pi._K);
+    random_challenges = gen_random_field_elements_from_transcripts(transcript_g1, transcript_g2, transcript_gt, 2);
+    _y = random_challenges[0];
+    _z = random_challenges[1];
+
+    transcript_g1.push_back(pi._pi_tilde);
+    transcript_gt.push_back(pi._T_1);
+    transcript_gt.push_back(pi._T_2);
+    _x = gen_random_field_elements_from_transcripts(transcript_g1, transcript_g2, transcript_gt, 1)[0];
 
     z_powers_0 = vector_powers(_z, _set_size+2); // 1, z, z^2, ... , z^m
     y_powers_0 = vector_powers(_y, _D-1);
@@ -108,7 +120,7 @@ bool Verifier::verify_base(const CredProof& pi, Agenda& agenda) {
     **/
     _right_1 = _srs.gt ^ (pi._t_tilde - _delta);
     _right_2 = beta_N_plus_2_GT ^ (pi._r_x);
-    _right_3 = ReducedPairing(pi._pi_tilde, this->_srs.g2_base_);
+    _right_3 = ReducedPairing(pi._pi_tilde, _srs.get_g2_beta_exp(0));
     // _right_3 = ReducedPairing(pi._pi_tilde, G2::one());
     _right = _right_1 * _right_2 * _right_3;
 
@@ -203,10 +215,16 @@ bool Verifier::verify_base(const CredProof& pi, Agenda& agenda) {
   return result;
 }
 
-bool Verifier::verify_improved(const CredProof& pi, Agenda& agenda) {
+bool Verifier::verify_improved(const CRangeProof& pi, Agenda& agenda) {
 
   bool result;
   agenda.create_item("Verify_improved");
+
+  vector<Fr> transcript_fr;
+  vector<G1> transcript_g1;
+  vector<G2> transcript_g2;
+  vector<GT> transcript_gt;
+  vector<Fr> random_challenges;
 
   Fr _y, _z, _x;  // randoms used in interaction
   
@@ -226,7 +244,7 @@ bool Verifier::verify_improved(const CredProof& pi, Agenda& agenda) {
   
   agenda.create_item("beta_N_plus_2_GT");
   two = Fr::one() + Fr::one();
-  // beta_N_plus_2_GT = ReducedPairing(this->_srs.get_g1_beta_exp(_N+2), this->_srs.g2_base_));
+  // beta_N_plus_2_GT = ReducedPairing(this->_srs.get_g1_beta_exp(_N+2), _srs.get_g2_beta_exp(0)));
   beta_N_plus_2_GT = ReducedPairing(this->_srs.get_g1_beta_exp(_N), this->_srs.get_g2_beta_exp(2));
   agenda.mark_item_end("beta_N_plus_2_GT");
 
@@ -239,8 +257,17 @@ bool Verifier::verify_improved(const CredProof& pi, Agenda& agenda) {
 #endif
     /** re-compute random y,z,x, copute y_powers, z_powers **/
     agenda.create_item("Verify_improved::generate_randoms");
-    generate_random_y_z(pi._A, pi._K, _y, _z);
-    generate_random_x(pi._pi_tilde, pi._T_1, pi._T_2, _x);
+    transcript_g1.push_back(pi._A);
+    transcript_g1.push_back(pi._K);
+    random_challenges = gen_random_field_elements_from_transcripts(transcript_g1, transcript_g2, transcript_gt, 2);
+    _y = random_challenges[0];
+    _z = random_challenges[1];
+
+    transcript_g1.push_back(pi._pi_tilde);
+    transcript_gt.push_back(pi._T_1);
+    transcript_gt.push_back(pi._T_2);
+    _x = gen_random_field_elements_from_transcripts(transcript_g1, transcript_g2, transcript_gt, 1)[0];
+
     agenda.mark_item_end("Verify_improved::generate_randoms");
 
     agenda.create_item("Verify_improved::z_powers_0");
@@ -303,7 +330,7 @@ bool Verifier::verify_improved(const CredProof& pi, Agenda& agenda) {
     _right_1 = _srs.gt ^ (pi._t_tilde - _delta);
     _right_2 = beta_N_plus_2_GT ^ (pi._r_x);
     // _right_3 = ReducedPairing(pi._pi_tilde, G2::one());
-    _right_3 = ReducedPairing(pi._pi_tilde, this->_srs.g2_base_);
+    _right_3 = ReducedPairing(pi._pi_tilde, _srs.get_g2_beta_exp(0));
     _right = _right_1 * _right_2 * _right_3;
     agenda.mark_item_end("Verify_improved::_right");
 
@@ -324,7 +351,7 @@ bool Verifier::verify_improved(const CredProof& pi, Agenda& agenda) {
   bool kzg_result_fzy, kzg_result_fg, kzg_result_fh;
   std::vector<G1> g1tuple;
   std::vector<G2> g2tuple;
-  kzgCommitKey kzg_ck;
+  CKzgKey kzg_ck;
 
   const bool range_check = true;
   if(range_check) {
@@ -335,7 +362,7 @@ bool Verifier::verify_improved(const CredProof& pi, Agenda& agenda) {
     agenda.create_item("/** inner product check for range proof **/");
 
     F = pi._commit_fzy;
-    F = pi._commit_fzy_1 + pi._commit_fzy_2;
+    // F = pi._commit_fzy_1 + pi._commit_fzy_2;
     P_apos = pi._A + (_x * pi._K) + F + (-pi._mu) * _srs.get_g1_beta_exp(_N);
     this->_ipa_prove_sys._P = P_apos;
 
@@ -347,9 +374,9 @@ bool Verifier::verify_improved(const CredProof& pi, Agenda& agenda) {
     result &= this->_ipa_prove_sys.IpaMultiExpVerify(pi._pi_ipa, g, h);
     agenda.mark_item_end("Verify_improved::IpaVerify");
 
-    g1tuple = {_srs.g1_base_};
-    g2tuple = {this->_srs.g2_base_, _srs.get_g2_beta_exp(1)};
-    kzg_ck = kzgCommitKey(g1tuple, g2tuple);
+    g1tuple = {_srs.get_g1_beta_exp(0)};
+    g2tuple = {_srs.get_g2_beta_exp(0), _srs.get_g2_beta_exp(1)};
+    kzg_ck = CKzgKey(g1tuple, g2tuple);
 
 #ifdef CRED_DEBUG
     libff::enter_block("/** polynomial check **/");
@@ -365,6 +392,7 @@ bool Verifier::verify_improved(const CredProof& pi, Agenda& agenda) {
 #endif
 
     result &= kzg_result_fzy & kzg_result_fg & kzg_result_fh;
+    // result &= kzg_result_fzy;
 
 #ifdef CRED_DEBUG
     libff::leave_block("/** inner product check for range proof **/");

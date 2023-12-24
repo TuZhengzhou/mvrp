@@ -6,11 +6,11 @@ Declaration of Kate Polynomial Commitment in the generic group (GG) model.
 This includes:
 - class for commitment key: G1_vector
 - class for commitment: G1 element
-- class for KZGProof
+- class for CKzgProof
 - class for polynomial: Fr_vector
 - PK generator algorithm
 - commit algorithm
-- create KZGProof/evaluation algorithm
+- create CKzgProof/evaluation algorithm
 - evaluation verifier algorithm
 
 The implementation instantiates the protocol of \[KZG10].
@@ -28,13 +28,132 @@ References:
  <https://cacr.uwaterloo.ca/techreports/2010/cacr2010-10.pdf>
 
 *****************************************************************************/
-#include "structs.hpp"
 
 #ifndef CRED_KZG_HPP_
 #define CRED_KZG_HPP_
 
+#include <vector>
+#include <utility>
+#include <cstddef>
+#include <xassert/XAssert.h>
+#include "basic_types.hpp"
+
+using std::vector;
+using std::pair;
+
 namespace cred
 {
+
+/******************************** Commitment key ********************************/
+// class CKzgKey;
+// std::ostream& operator<<(std::ostream &out, const CKzgKey &ck);
+// std::istream& operator>>(std::istream &in, CKzgKey &ck);
+
+class CKzgKey
+{
+    public:
+    std::vector<G1> g1;
+    std::vector<G2> g2;
+
+    CKzgKey() = default;
+    CKzgKey& operator=(const CKzgKey &other) = default;
+    CKzgKey(const CKzgKey &other) = default;
+    CKzgKey(CKzgKey &&other) = default;
+    CKzgKey(
+        std::vector<G1> &&g1,
+        std::vector<G2> &&g2) :
+    g1(std::move(g1)),
+    g2(std::move(g2))
+    {};
+    CKzgKey(
+        std::vector<G1> &g1,
+        std::vector<G2> &g2) :
+    g1(g1),
+    g2(g2)
+    {};
+
+    size_t G1_size() const
+    {
+        return g1.size();
+    }
+
+    size_t G2_size() const
+    {
+        return g2.size();
+    }
+
+    size_t GT_size() const
+    {
+        return 1;
+    }
+
+    size_t size_in_bits() const
+    {
+      size_t ret;
+      ret += g1.size() > 0 ? g1.size() * sizeof(g1[0]) : 0;
+      ret += g2.size() > 0 ? g2.size() * sizeof(g2[0]) : 0;
+      return ret;
+    }
+
+    void print_size() const
+    {
+        libff::print_indent(); printf("* G1 elements in CommitKey: %zu\n", this->G1_size());
+        libff::print_indent(); printf("* G2 elements in CommitKey: %zu\n", this->G2_size());
+        libff::print_indent(); printf("* Commit Key size in bits: %zu\n", this->size_in_bits());
+    }
+
+    bool operator==(const CKzgKey &other) const;
+    friend std::ostream& operator<< (std::ostream &out, const CKzgKey &ck);
+    friend std::istream& operator>> (std::istream &in, CKzgKey &ck);
+};
+
+/******************************** Witness ********************************/
+
+class CKzgProof
+{
+    public:
+    // Fr point; // can be computed
+    G1 eval;    // [f(point)]_1
+    std::vector<Fr> psi;
+    G1 w1;      // [h(point) except the N+1 term]_1
+    GT wt;      // [the N+1 term of h(point)]_2, set to 0 when h(x) has no N+1 term
+
+    CKzgProof() = default;
+    CKzgProof& operator=(const CKzgProof &other) = default;
+    CKzgProof(const CKzgProof &other) = default;
+    CKzgProof(CKzgProof &&other) = default;
+    CKzgProof(
+        G1 &&eval,
+        G1 &&w1):
+
+    // point(std::move(point)),
+    eval(std::move(eval)),
+    w1(std::move(w1))
+    {};
+
+    size_t G1_size() const
+    {
+        return sizeof(w1) + sizeof(eval);
+    }
+
+    size_t size_in_bits() const
+    {
+       return (1 + w1.size_in_bits() + eval.size_in_bits());
+    }
+
+    void print_size() const
+    {
+        libff::print_indent(); printf("* G1 elements in Witness: %zu\n", this->G1_size());
+        libff::print_indent(); printf("* Witness size in bits: %zu\n", this->size_in_bits());
+    }
+
+    // bool operator==(const CKzgProof &other) const;
+    // friend std::ostream& operator<< (std::ostream &out, const CKzgProof &wit);
+    // friend std::istream& operator>> (std::istream &in, CKzgProof &wit);
+};
+
+// std::ostream& operator<< (std::ostream &out, const CKzgProof &wit);
+// std::istream& operator>> (std::istream &in, CKzgProof &wit);
 
 /***************************** Main algorithms *******************************/
 
@@ -45,7 +164,7 @@ namespace cred
  */
 
 
-kzgCommitKey kzg_setup(const size_t t);
+CKzgKey kzg_setup(const size_t t);
 
 /**
  * Random Point Generator for the KZG10.
@@ -66,18 +185,18 @@ Fr kzg_hash(const G1 &commit);
  */
 
 // G1 kzg_commit(std::vector<G1> &ck, std::vector<Fr> &poly, size_t t);
-G1 kzg_commit(const kzgCommitKey &ck, const std::vector<Fr> &poly, const size_t t);
+G1 kzg_commit(const CKzgKey &ck, const std::vector<Fr> &poly, const size_t t);
 
 /**
- * A KZGProof-generate algorithm for the KZG10.
+ * A CKzgProof-generate algorithm for the KZG10.
  *
- * Given a public key, polynomial, and evaluation point, this algorithm produces a KZGProof of the evaluation of the polynomial.
+ * Given a public key, polynomial, and evaluation point, this algorithm produces a CKzgProof of the evaluation of the polynomial.
  * (It proves that Polynomial is evaluated at particular evaluation point)
  */
 
-KZGProof kzg_prove(const kzgCommitKey &ck, std::vector<Fr> &poly, const Fr &point, const size_t t);
+CKzgProof kzg_prove(const CKzgKey &ck, std::vector<Fr> &poly, const Fr &point, size_t t);
 
-pair<G1, KZGProof> kzg_prove(CredSRS& srs, const size_t exp_start, const size_t exp_span, std::vector<Fr>& poly, vector<G1>::iterator g1s_iter, vector<G2>::iterator g2s_iter);
+CKzgProof kzg_prove(const CCredSRS& srs, std::vector<Fr>& poly, size_t t, G1& commit);
 
 /**
  * Polynomial Evaluation algorithm for the KZG10.
@@ -93,14 +212,14 @@ Fr kzg_evaluate(const std::vector<Fr> &poly, const Fr &point, const size_t t);
  /**
  * A Evaluation Verifier algorithm for the KZG10.
  *
- * Given a public key, commitment,and KZGProof, this algorithm verifies the following statement.
+ * Given a public key, commitment,and CKzgProof, this algorithm verifies the following statement.
  * "Polynomial is evaluated at particular evaluation point."
  */
 
-bool kzg_vfyeval(const kzgCommitKey &ck, const G1 &commit, const KZGProof &KZGProof);
+bool kzg_vfyeval(const CKzgKey &ck, const G1 &commit, const CKzgProof &CKzgProof);
 
 bool kzg_test();
 
-} //cred
+} // namespace cred
 
 #endif // CRED_KZG_HPP_

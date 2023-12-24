@@ -6,8 +6,8 @@
 #include "libff/common/utils.hpp"
 #include "libff/algebra/curves/public_params.hpp"
 #include "structs.hpp"
-#include "prover_circuit.hpp"
-#include "kzg.hpp"
+#include "circuit_prover.hpp"
+#include "linear_combination.hpp"
 
 namespace cred {
 
@@ -44,42 +44,27 @@ const G1& ProverCircuit::point_proof(size_t idx) {
   return _point_proofs[idx-1];
 }
 
-// ProverCircuit::ProverCircuit(const CredSRS& srs, const SET& S, const Ranges& ranges, const IPAProveSystem& ipa_sys) {
-//   _srs = CredSRS(srs);
-//   _S = SET(S);
-//   _ipa_prove_sys = ipa_sys;
-
-//   _N = _srs.N;
-
-//   commit_set();                 // 
-//   point_proof_pre_compute();
-// }
-ProverCircuit::ProverCircuit(const CredSRS& srs, \
-                const vector<vector<Fr>>& WL, const vector<vector<Fr>>& WR, const vector<vector<Fr>>& WO, const vector<vector<Fr>>& WU, \
-                vector<Fr> c, map<size_t, size_t> map, \
-                const SET& S, vector<Fr> aL, vector<Fr> aR, vector<Fr> aO, \
+ProverCircuit::ProverCircuit(const CCredSRS& srs, const vector<LinearCombination>& constraints, \
+                const size_t num_multi_gate, const size_t num_commit_input, const map<size_t, size_t>& map, \
+                const CSet& S, const vector<Fr>& aL, const vector<Fr>& aR, const vector<Fr>& aO, \
                 const IPAProveSystem& ipa_sys) 
 {
   // 公开输入的复制
-  _srs = CredSRS(srs);
-  _WL = WL;
-  _WR = WR;
-  _WO = WO;
-  _WU = WU;
-  _c = c;
+  _srs = CCredSRS(srs);
+  _constraints = constraints;
   _map = map;
 
   // 秘密输入的复制
-  _S = SET(S);
+  _S = CSet(S);
   _a_L = aL;
   _a_R = aR;
   _a_O = aO;
 
   // 公开输入的推断
   _N = _srs.N;
-  _Q = WL.size();
-  _n = WL[0].size();
-  _num_commit_input = WU[0].size();
+  _num_constraints = constraints.size();
+  _num_multi_gate = num_multi_gate;
+  _num_commit_input = num_commit_input;
 
   // 秘密输入的推断
   _u.clear();
@@ -94,30 +79,78 @@ ProverCircuit::ProverCircuit(const CredSRS& srs, \
   point_proof_pre_compute();
 
   _beta_powers_sum_neg = G1::zero();
-  for(size_t i = 1; i <= _n; i++) {
+  for(size_t i = 1; i <= _num_multi_gate; i++) {
     _beta_powers_sum_neg = _beta_powers_sum_neg - _srs.get_g1_beta_exp((_N+1)+i);
   }
 }
 
-ProofCircuit ProverCircuit::prove(Agenda& agenda, const bool improved) {
+/// Use a challenge, `z`, to flatten the constraints in the
+/// constraint system into vectors used for proving and
+/// verification.
+///
+/// # Output
+///
+/// Returns a tuple of
+/// ```text
+/// (wL, wR, wO)
+/// ```
+/// where `w{L,R,O}` is \\( z \cdot z^Q \cdot W_{L,R,O} \\).
+void ProverCircuit::flatten_constraints(const vector<LinearCombination>& constraints, const Fr& z, size_t num_multi_gate, vector<Fr>& wL, vector<Fr>& wR, vector<Fr>& wO) {
+  
+  wL.resize(num_multi_gate, Fr(0));
+  wR.resize(num_multi_gate, Fr(0));
+  wO.resize(num_multi_gate, Fr(0));
+
+  Fr exp_z = z;
+  for(auto lc: constraints) {
+    for(auto term: lc.terms) {
+      switch (term.first.type)
+      {
+      case VType::MultiplierLeft:
+        wL[term.first.index] += term.second * exp_z;
+        break;
+
+      case VType::MultiplierRight:
+        wR[term.first.index] += term.second * exp_z;
+        break;
+
+      case VType::MultiplierOutput:
+        wO[term.first.index] += term.second * exp_z;
+        break;
+
+      case VType::Committed:
+        break;
+      case VType::One:
+        break;
+      default:
+        break;
+      }
+    }
+    exp_z = exp_z * z;
+  }
+
+  return;
+}
+
+CCircuitProof ProverCircuit::prove(Agenda& agenda, const bool improved) {
   // if(improved) 
   //   return prove_improved(agenda);
   return prove_base(agenda);
 }
 
-ProofCircuit ProverCircuit::prove_base(Agenda& agenda) {
+CCircuitProof ProverCircuit::prove_base(Agenda& agenda) {
 
   agenda.create_item("Prove_base");
   
-  ProofCircuit pi; // global proof pi
+  CCircuitProof pi; // global proof pi
   std::ostream_iterator<Fr>   outFr(cout, ", ");
   std::ostream_iterator<bool> outBo(cout, ", ");
 
-  vector<Fr> vec_fr;
-  vector<G1> vec_1;
-  vector<G2> vec_2;
-  vector<GT> vec_T;
-  vector<Fr> vec_r;
+  vector<Fr> transcript_fr;
+  vector<G1> transcript_g1;
+  vector<G2> transcript_g2;
+  vector<GT> transcript_gt;
+  vector<Fr> random_challenges;
 
   GT beta_N_plus_2_GT = ReducedPairing(this->_srs.get_g1_beta_exp(_N), this->_srs.get_g2_beta_exp(2));
 
@@ -155,10 +188,10 @@ ProofCircuit ProverCircuit::prove_base(Agenda& agenda) {
     _r_1 = Fr::random_element();
     _r_2 = Fr::random_element();
     _r_3 = Fr::random_element();
-    _K_L = std::vector<Fr>(_n);
-    _K_R = std::vector<Fr>(_n);
+    _K_L = std::vector<Fr>(_num_multi_gate);
+    _K_R = std::vector<Fr>(_num_multi_gate);
     // Fr::random_e
-    for(i = 0; i < _n; i++) {
+    for(i = 0; i < _num_multi_gate; i++) {
       _K_L[i] = Fr::random_element();
       _K_R[i] = Fr::random_element();
     }
@@ -175,7 +208,7 @@ ProofCircuit ProverCircuit::prove_base(Agenda& agenda) {
     _AI = _r_1 * this->_srs.get_g1_beta_exp(_N);
     _AO = _r_2 * this->_srs.get_g1_beta_exp(_N);
     _K  = _r_3 * this->_srs.get_g1_beta_exp(_N);
-    for(size_t i = 1; i <= _n; i++) {
+    for(size_t i = 1; i <= _num_multi_gate; i++) {
       _AI = _AI + _a_L[i-1] * this->_srs.get_g1_beta_exp(i) + _a_R[i-1] * this->_srs.get_g1_beta_exp((_N+1)+i);
       _AO = _AO + _a_O[i-1] * this->_srs.get_g1_beta_exp(i);
       _K = _K + _K_L[i-1] * this->_srs.get_g1_beta_exp(i) + _K_R[i-1] * this->_srs.get_g1_beta_exp((_N+1)+i);
@@ -197,27 +230,32 @@ ProofCircuit ProverCircuit::prove_base(Agenda& agenda) {
   std::vector<Fr> z_powers_1; // index 0 with z^0, [1, z, z^2, ... , z^m, z^(m+1)]
   std::vector<Fr> y_powers_0; // index 0 with y^1, [1, y, y^2, ..., y^(D-1)]
   std::vector<Fr> y_inv_powers_0;
+  std::vector<Fr> flatten_wL(_num_multi_gate, Fr(0));
+  std::vector<Fr> flatten_wR(_num_multi_gate, Fr(0));
+  std::vector<Fr> flatten_wO(_num_multi_gate, Fr(0));
 
   // G1 point_proof;   // point proof of one item
-  vec_1.push_back(pi._AI);
-  vec_1.push_back(pi._AO);
-  vec_1.push_back(pi._K);
-  vec_r = generate_random_fr_vec(vec_1, vec_2, vec_T, 2);
-  _y = vec_r[0];
-  _z = vec_r[1];
+  transcript_g1.push_back(pi._AI);
+  transcript_g1.push_back(pi._AO);
+  transcript_g1.push_back(pi._K);
+  random_challenges = gen_random_field_elements_from_transcripts(transcript_g1, transcript_g2, transcript_gt, 2);
+  _y = random_challenges[0];
+  _z = random_challenges[1];
 
-  z_powers_0 = vector_powers(_z, _Q); // 1, z, z^2, ... , z^m, z^(m+1)
-  z_powers_1.resize(_Q);
-  for(size_t i = 0; i < _Q; i++) {
+  z_powers_0 = vector_powers(_z, _num_constraints); // 1, z, z^2, ... , z^m, z^(m+1)
+  z_powers_1.resize(_num_constraints);
+  for(size_t i = 0; i < _num_constraints; i++) {
     z_powers_1[i] = z_powers_0[i+1];
   }
-  y_powers_0 = vector_powers(_y, _n - 1);
-  y_inv_powers_0 = vector_powers(_y.inverse(), _n - 1);
+  y_powers_0 = vector_powers(_y, _num_multi_gate - 1);
+  y_inv_powers_0 = vector_powers(_y.inverse(), _num_multi_gate - 1);
+
+  flatten_constraints(_constraints, _z, _num_multi_gate, flatten_wL, flatten_wR, flatten_wO);
 
   vector<Fr> l_x_3;
   vector<Fr> r_x_1, r_x_2, r_x_3, r_x_4, r_x_5;
-  l_x_3 = hadmard_product(y_inv_powers_0, vec_matrix_mult(z_powers_1, _WR, true));
-  r_x_3 = vec_matrix_mult(z_powers_1, _WL, true);
+  l_x_3 = hadmard_product(y_inv_powers_0, flatten_wR);
+  r_x_3 = flatten_wL;
   delta = inner_product(l_x_3, r_x_3);
   
   const bool round_2 = true;
@@ -233,7 +271,7 @@ ProofCircuit ProverCircuit::prove_base(Agenda& agenda) {
     l_coefs.emplace_back(pair<vector<Fr>, size_t>(_K_L , (size_t)3));
     r_x_1 = hadmard_product(y_powers_0, _a_R);
     r_x_2 = vector_neg(y_powers_0);
-    r_x_4 = vec_matrix_mult(z_powers_1, _WO, true);
+    r_x_4 = flatten_wO;
     r_x_5 = hadmard_product(y_powers_0, _K_R);
     r_coefs.emplace_back(pair<vector<Fr>, size_t>(r_x_1 , (size_t)1));
     r_coefs.emplace_back(pair<vector<Fr>, size_t>(r_x_2 , (size_t)0));
@@ -280,10 +318,15 @@ ProofCircuit ProverCircuit::prove_base(Agenda& agenda) {
   std::vector<G1> g_vec;          // [[β^1]_1, ..., [β^D]_1]
   std::vector<G1> h_vec;          // [[y^(1-1) * β^(N+1+1)]_1, ..., [[y^(1-i) * β^(N+1+i)]_1], ..., [y^(1-D) * β^(N+1+D)]_1]
 
-  for(size_t i = 1; i <= this->_n; i++) {
+  for(size_t i = 1; i <= this->_num_multi_gate; i++) {
     g_vec.push_back(this->_srs.get_g1_beta_exp(i));
     h_vec.push_back(y_inv_powers_0[i-1] * this->_srs.get_g1_beta_exp((this->_N+1)+i));
   }
+
+  vector<Fr> bold_wL, bold_wR, bold_wO;
+  G1 WL_apos, WR_apos, WO_apos;
+  G1 P_G1, P_G1_apos;
+  G1 P_G1_v, P_G1_apos_v;
 
   const bool round_3 = true;
   if(round_3) {
@@ -292,28 +335,28 @@ ProofCircuit ProverCircuit::prove_base(Agenda& agenda) {
     libff::enter_block("/** Round3: range_prove, output \\mu, r_x, pi_ipa, t_tilde = t(x) **/");
 #endif
 
-    vec_1.push_back(pi._pi_tilde);
-    vec_T.push_back(pi._T_1);
-    vec_T.push_back(pi._T_3);
-    vec_T.push_back(pi._T_4);
-    vec_T.push_back(pi._T_5);
-    vec_T.push_back(pi._T_6);
-    _x = generate_random_fr_vec(vec_1, vec_2, vec_T, 1)[0];
+    transcript_g1.push_back(pi._pi_tilde);
+    transcript_gt.push_back(pi._T_1);
+    transcript_gt.push_back(pi._T_3);
+    transcript_gt.push_back(pi._T_4);
+    transcript_gt.push_back(pi._T_5);
+    transcript_gt.push_back(pi._T_6);
+    _x = gen_random_field_elements_from_transcripts(transcript_g1, transcript_g2, transcript_gt, 1)[0];
 
-    _l_bold = vector<Fr>(_n, Fr::zero());
-    _r_bold = vector<Fr>(_n, Fr::zero());
+    _l_bold = vector<Fr>(_num_multi_gate, Fr(0));
+    _r_bold = vector<Fr>(_num_multi_gate, Fr(0));
     for(auto l_coef: l_coefs) {
       _l_bold = vector_add(_l_bold, numerical_mult(_x^(l_coef.second), l_coef.first));
     }
     for(auto r_coef: r_coefs) {
       _r_bold = vector_add(_r_bold, numerical_mult(_x^(r_coef.second), r_coef.first));
     }
-    _t_tilde = Fr::zero();
+    _t_tilde = Fr(0);
     for(auto t_coef: map_t_coefs_6){
       _t_tilde += (_x ^ (t_coef.first)) *  t_coef.second;
     }
 
-    _theta_x = Fr::zero();
+    _theta_x = Fr(0);
     for(size_t i = 1; i <= 6; i++) {
       if(i != 2){
         _theta_x += map_theta_6[i] * (_x ^ i);
@@ -325,103 +368,26 @@ ProofCircuit ProverCircuit::prove_base(Agenda& agenda) {
     pi._mu      = _mu;
     pi._t_tilde = _t_tilde;
 
-#ifdef CRED_DEBUG
-    assert(_t_tilde == inner_product(_l_bold, _r_bold));
-
-    Fr theta_sum, t_sum;
-    GT check_l_1, check_t;
-
-    theta_sum = map_theta_6[1] * _x;
-    check_t   = _srs.gt ^ (map_t_coefs_6[1] * _x);
-    check_l_1 = map_T_6[1] ^ _x;
-    for(size_t i = 2; i <= 6; i++) {
-      theta_sum = theta_sum + map_theta_6[i] * (_x^i);
-      check_t   = check_t   * (_srs.gt ^ (map_t_coefs_6[i] * (_x ^ i)));
-      check_l_1 = check_l_1 * ((map_T_6[i]) ^ (_x^i));
-    }
-    assert((_srs.gt ^ (_t_tilde)) == check_t);
-    assert((_srs.gt ^ (_t_tilde)) * (beta_N_plus_2_GT ^ theta_sum) == check_l_1);
-
-    vector<Fr> w_tmp = vector<Fr>(_Q, Fr::zero());
-    w_tmp = vector_add(w_tmp, vec_matrix_mult(_a_L, _WL, false));
-    w_tmp = vector_add(w_tmp, vec_matrix_mult(_a_R, _WR, false));
-    w_tmp = vector_add(w_tmp, vec_matrix_mult(_a_O, _WO, false));
-    assert(map_t_coefs_6[2] == (inner_product(z_powers_1, w_tmp) + delta));  // delta 计算正确
-
-    G2 sum_z_pows_beta_pows = G2::zero();
-    for(size_t j = 1; j <= _num_commit_input; j++) {
-      sum_z_pows_beta_pows = sum_z_pows_beta_pows + z_powers_0[j] * this->_srs.get_g2_beta_exp(_N + 1 - _map[j]);
-    }
-
-    GT check_l_2;
-    GT check_r_1, check_r_2, check_r_3;
-    GT check_l, check_r;
-
-    check_l_1 = (pi._T_1) ^ _x;
-    check_l_1 = check_l_1 * ((pi._T_3) ^ (_x^3));
-    check_l_1 = check_l_1 * ((pi._T_4) ^ (_x^4));
-    check_l_1 = check_l_1 * ((pi._T_5) ^ (_x^5));
-    check_l_1 = check_l_1 * ((pi._T_6) ^ (_x^6));
-    check_l_2 = ReducedPairing(_V, (_x^2) * sum_z_pows_beta_pows);
-
-    assert(inner_product(z_powers_1, _c) == Fr::zero());  // c 计算正确
-
-    check_r_1 = _srs.gt ^ (pi._t_tilde - (_x^2) * (delta + inner_product(z_powers_1, _c)));
-    check_r_2 = beta_N_plus_2_GT ^ (pi._theta_x);
-    check_r_3 = ReducedPairing((_x^2) * pi._pi_tilde, _srs.g2_base_);
-
-    check_l = check_l_1 * check_l_2;
-    check_r = check_r_1 * check_r_2 * check_r_3;
-
-    Fr mizi = Fr::zero();
-    for (size_t i = 1; i <= _num_commit_input; i++) {
-      mizi = mizi + z_powers_0[i] * _S.get_set_value(_map[i]);
-    }
-
-    GT mizi_gt = _srs.gt ^ (mizi * (_x^2));
-
-    for(size_t tmp = 1; tmp <= _num_commit_input; tmp++) {
-      assert(ReducedPairing(_V, _srs.get_g2_beta_exp(_N+1-_map[tmp])) == ReducedPairing(this->point_proof(_map[tmp]), _srs.g2_base_) * ((_srs.gt)^(_S.get_set_value(_map[tmp]))));
-    }
-    G2 sum_z_beta = G2::zero();
-    for(size_t j = 1; j <= _num_commit_input; j++) {
-      sum_z_beta = sum_z_beta + z_powers_0[j] * this->_srs.get_g2_beta_exp(_N + 1 - _map[j]);
-    }
-    G1 pi_tilde = G1::zero();
-    for(size_t j = 1; j <= _num_commit_input; j++) {
-      pi_tilde = pi_tilde + z_powers_0[j] * this->point_proof(_map[j]);
-    }
-    assert(ReducedPairing(_V, sum_z_beta) == ReducedPairing(pi_tilde, _srs.g2_base_) * (_srs.gt ^ mizi));
-    
-
-    assert(check_l_2 == mizi_gt * check_r_3);
-    assert(check_l_1 * mizi_gt == check_r_1 * check_r_2);
-
-    assert(check_l == check_r);
-#endif
     /** round 4 */
-    vec_fr.push_back(pi._theta_x);
-    vec_fr.push_back(pi._mu);
-    vec_fr.push_back(pi._t_tilde);
-    _x_t_tilde = generate_random_fr_vec(vec_fr, vec_1, vec_2, vec_T, (size_t)1)[0];
+    transcript_fr.push_back(pi._theta_x);
+    transcript_fr.push_back(pi._mu);
+    transcript_fr.push_back(pi._t_tilde);
+    _x_t_tilde = gen_random_field_elements_from_transcripts(transcript_fr, transcript_g1, transcript_g2, transcript_gt, (size_t)1)[0];
 
-    vector<Fr> bold_wL, bold_wR, bold_wO;
-    G1 WL_apos, WR_apos, WO_apos;
-    G1 P_G1, P_G1_apos;
-    G1 P_G1_v, P_G1_apos_v;
-
-    bold_wL = hadmard_product(y_inv_powers_0, vec_matrix_mult(z_powers_1, _WL, true));
-    bold_wR = hadmard_product(y_inv_powers_0, vec_matrix_mult(z_powers_1, _WR, true));
-    bold_wO = hadmard_product(y_inv_powers_0, vec_matrix_mult(z_powers_1, _WO, true));
+    libff::enter_block("compute wL, wR, wO");
+    bold_wL = hadmard_product(y_inv_powers_0, flatten_wL);
+    bold_wR = hadmard_product(y_inv_powers_0, flatten_wR);
+    bold_wO = hadmard_product(y_inv_powers_0, flatten_wO);
 
     WL_apos = G1::zero();
     WR_apos = G1::zero();
     WO_apos = G1::zero();
-    for(size_t i = 1; i <= _n; i++) {
+    for(size_t i = 1; i <= _num_multi_gate; i++) {
       WL_apos = WL_apos + bold_wL[i-1] * _srs.get_g1_beta_exp((_N+1)+i);
       WR_apos = WR_apos + bold_wR[i-1] * _srs.get_g1_beta_exp(i);
       WO_apos = WO_apos + bold_wO[i-1] * _srs.get_g1_beta_exp((_N+1)+i);
     }
+    libff::leave_block("compute wL, wR, wO");
 
     P_G1_v = G1::zero();
     P_G1_v = P_G1_v + (_x ^ 1) * (pi._AI);
@@ -434,7 +400,7 @@ ProofCircuit ProverCircuit::prove_base(Agenda& agenda) {
     
 #ifdef CRED_DEBUG
     P_G1 = G1::zero();
-    for(size_t i = 0; i < _n; i++) {
+    for(size_t i = 0; i < _num_multi_gate; i++) {
       P_G1 = P_G1 + _l_bold[i] * g_vec[i];
       P_G1 = P_G1 + _r_bold[i] * h_vec[i];
     }
@@ -447,7 +413,9 @@ ProofCircuit ProverCircuit::prove_base(Agenda& agenda) {
     this->_ipa_prove_sys._P = P_G1_apos;
     this->_ipa_prove_sys._c = _t_tilde;
     agenda.create_item("Prove::IpaProve");
+    libff::enter_block("Prove::IpaProve");
     auto pi_ipa             = this->_ipa_prove_sys.IpaProve(g_vec, h_vec, _l_bold, _r_bold, _t_tilde);
+    libff::leave_block("Prove::IpaProve");
     agenda.mark_item_end("Prove::IpaProve");
 
 #ifdef CRED_DEBUG
@@ -458,10 +426,50 @@ ProofCircuit ProverCircuit::prove_base(Agenda& agenda) {
   }
 
   agenda.mark_item_end("Prove_base::Round3");
+
+  vector<cred::Fr> poly_fwr_apos;
+  poly_fwr_apos = shift_and_reverse(bold_wR, 1);
+  pi._pi_kzg_fwr_apos = kzg_prove(_srs, poly_fwr_apos, poly_fwr_apos.size(), pi._commit_fwr_apos);
+
+  vector<cred::Fr> poly_fwlo_apos;
+  poly_fwlo_apos = shift_and_reverse(vector_add(numerical_mult(_x, bold_wL), bold_wO), _N+2);
+  pi._pi_kzg_fwlo_apos = kzg_prove(_srs, poly_fwlo_apos, poly_fwlo_apos.size(), pi._commit_fwlo_apos);
+
+  /** compute randomes used for inner-product-argument folding */
+  size_t recursion_time;
+  std::vector<Fr> randoms; 
+
+  recursion_time = pi._pi_ipa.L_vec.size();
+  randoms = std::vector<Fr>(recursion_time, Fr::zero());
+
+  randoms[0] = IPAProveSystem::generate_random(Fr::zero(), pi._pi_ipa.L_vec[0], pi._pi_ipa.R_vec[0]);
+  for(size_t i = 1; i < recursion_time; i++) {
+    randoms[i] = IPAProveSystem::generate_random(randoms[i-1], pi._pi_ipa.L_vec[i], pi._pi_ipa.R_vec[i]);
+  }
+
+  /** compute polynomial fg, fh */
+  std::vector<Fr> ss, ss_inv;
+
+  agenda.create_item("Prove::multi_exponentiation_n");
+  ss = multi_exponentiation_n(randoms, recursion_time);
+  ss_inv.resize(ss.size());
+
+  for(i = 0; i < ss.size(); i++) {
+    ss_inv[i] = ss[i].inverse();
+  }
+  agenda.mark_item_end("Prove::multi_exponentiation_n");
+
+  std::vector<Fr> poly_fg, poly_fh;
+  poly_fg = shift_and_reverse(ss, 1);
+  pi._pi_kzg_fg = kzg_prove(_srs, poly_fg, poly_fg.size(), pi._commit_fg);
+
+  poly_fh = shift_and_reverse(hadmard_product(y_inv_powers_0, ss_inv), _N+2);
+  pi._pi_kzg_fh = kzg_prove(_srs, poly_fh, poly_fh.size(), pi._commit_fh);
+
   agenda.mark_item_end("Prove_base");
   agenda.mark_mem_usage("Prove_base");
 
   return pi;
 };
 
-}
+} // namespace cred

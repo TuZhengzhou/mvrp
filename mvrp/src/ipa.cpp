@@ -1,7 +1,8 @@
 #include <vector>
 #include <ostream>
-#include "structs.hpp"
 #include "ipa.hpp"
+#include "basic_types.hpp"
+#include "math_operations.hpp"
 
 namespace cred {
 Fr IPAProveSystem::generate_random(const Fr& pre_random, const G1& L, const G1& R) {
@@ -100,7 +101,7 @@ IPAProveSystem::IPAProveSystem(G1& P, G1& u, Fr& c){
    _c = c;
 }
 
-IPAProofOneRecursion IPAProveSystem::IpaProveOneRecursion(
+CIpaProofOneRecursion IPAProveSystem::IpaProveOneRecursion(
   const std::vector<G1>& g_vec, const std::vector<G1>& h_vec, \
   const std::vector<Fr>& a_vec, const std::vector<Fr>& b_vec, \
   const Fr& c
@@ -115,7 +116,7 @@ IPAProofOneRecursion IPAProveSystem::IpaProveOneRecursion(
   assert(n_apos * (size_t)2 == n);
 #endif
 
-  IPAProofOneRecursion pi;
+  CIpaProofOneRecursion pi;
 
   Fr cl, cr;
   std::vector<Fr> zero_vec = std::vector<Fr>(n_apos, Fr::zero());
@@ -149,7 +150,7 @@ IPAProofOneRecursion IPAProveSystem::IpaProveOneRecursion(
 
 
 bool IPAProveSystem::IpaVerifyOneRecursion(
-  const IPAProofOneRecursion& pi, const std::vector<G1>& g_vec, const std::vector<G1>& h_vec
+  const CIpaProofOneRecursion& pi, const std::vector<G1>& g_vec, const std::vector<G1>& h_vec
 ) {
   Fr c = inner_product(pi.a_vec, pi.b_vec);
   Fr x = generate_random(Fr::zero(), pi.L, pi.R);
@@ -179,7 +180,7 @@ bool IPAOneRecursionTest() {
   }
 
   IPAProveSystem ipa_sys(P, u, c);
-  IPAProofOneRecursion pi = ipa_sys.IpaProveOneRecursion(g_vec, h_vec, a_vec, b_vec, c);
+  CIpaProofOneRecursion pi = ipa_sys.IpaProveOneRecursion(g_vec, h_vec, a_vec, b_vec, c);
   bool result = ipa_sys.IpaVerifyOneRecursion(pi, g_vec, h_vec);
   assert(result == true);
   cout << "IPAOneRecursionTest result = " << result << endl;
@@ -187,7 +188,7 @@ bool IPAOneRecursionTest() {
   return result;
 }
 
-IPAProof IPAProveSystem::IpaProve(
+CIpaProof IPAProveSystem::IpaProve(
   const std::vector<G1>& g_vec, const std::vector<G1>& h_vec, \
   const std::vector<Fr>& a_vec, const std::vector<Fr>& b_vec, \
   const Fr& c) 
@@ -198,10 +199,10 @@ IPAProof IPAProveSystem::IpaProve(
   assert(a_vec.size() == n);
   assert(b_vec.size() == n);
 
-  assert(isPowerOfTwo(n));
+  assert(is_power_of_two(n));
 #endif
 
-  IPAProof pi;
+  CIpaProof pi;
   std::vector<G1> g_apos = g_vec;
   std::vector<G1> h_apos = h_vec;
   std::vector<Fr> a_apos = a_vec;
@@ -211,7 +212,7 @@ IPAProof IPAProveSystem::IpaProve(
   Fr x, pre_x, x_inv;
   std::vector<G1> g_apos_tmp, h_apos_tmp;
   std::vector<Fr> a_apos_tmp, b_apos_tmp;
-  IPAProofOneRecursion pi_one_recursion;
+  CIpaProofOneRecursion pi_one_recursion;
 
   // recursion_time = log2(n);
   pre_x = Fr::zero();
@@ -252,7 +253,7 @@ IPAProof IPAProveSystem::IpaProve(
   return pi;
 }
 
-bool IPAProveSystem::IpaVerify(const IPAProof& pi, const std::vector<G1>& g_vec, const std::vector<G1>& h_vec) {
+bool IPAProveSystem::IpaVerify(const CIpaProof& pi, const std::vector<G1>& g_vec, const std::vector<G1>& h_vec) {
 
   size_t i;
   size_t recursion_time = pi.L_vec.size();
@@ -296,7 +297,7 @@ bool IPAProveSystem::IpaVerify(const IPAProof& pi, const std::vector<G1>& g_vec,
   return P_apos == right;
 }
 
-bool IPAProveSystem::IpaMultiExpVerify(const IPAProof& pi, const std::vector<G1>& g_vec, const std::vector<G1>& h_vec){
+bool IPAProveSystem::IpaMultiExpVerify(const CIpaProof& pi, const std::vector<G1>& g_vec, const std::vector<G1>& h_vec){
   size_t recursion_time = pi.L_vec.size();
 
   std::vector<Fr> randoms     = std::vector<Fr>(recursion_time, Fr::zero());
@@ -354,7 +355,7 @@ bool IPAProveSystem::IpaMultiExpVerify(const IPAProof& pi, const std::vector<G1>
   return result;
 }
 
-bool IPAProveSystem::IpaMultiExpVerify(const IPAProof& pi, const G1& g, const G1& h){
+bool IPAProveSystem::IpaMultiExpVerify(const CIpaProof& pi, const G1& g, const G1& h){
   
   size_t recursion_time = pi.L_vec.size();
 
@@ -400,7 +401,7 @@ bool IPATest(size_t n) {
   bool result;
 
   IPAProveSystem ipa_sys(P, u, c);
-  IPAProof pi = ipa_sys.IpaProve(g_vec, h_vec, a_vec, b_vec, c);
+  CIpaProof pi = ipa_sys.IpaProve(g_vec, h_vec, a_vec, b_vec, c);
 
   libff::enter_block("IpaVerify");
   result = ipa_sys.IpaVerify(pi, g_vec, h_vec);

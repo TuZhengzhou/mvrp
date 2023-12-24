@@ -1,4 +1,4 @@
-#include "structs.hpp"
+#include "basic_types.hpp"
 
 using namespace cred;
 

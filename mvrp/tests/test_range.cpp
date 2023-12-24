@@ -8,10 +8,8 @@
 #include "libff/algebra/curves/bn128/bn128_pp.hpp"
 #include "libff/algebra/curves/public_params.hpp"
 #include "structs.hpp"
-#include "prover.hpp"
-#include "verifier.hpp"
-#include "ipa.hpp"
-#include "kzg.hpp"
+#include "range_prover.hpp"
+#include "range_verifier.hpp"
 #include "circuit_generator.hpp"
 
 // #include "prover.cpp"
@@ -57,11 +55,11 @@ int main(int argc,char *argv[]) {
   size_t N, D, num, bit_len;
   string mode;
   Agenda agenda;
-  CredProof pi;
-  bool result;
+  CRangeProof pi;
+  bool result = true;
 
   N = (1 << N_bit) + 1;
-  CredSRS srs = CredSRS(N);
+  CCredSRS srs = CCredSRS(N);
 
   const string base_format = "/root/mvrp/static/base/%s-N_%lu-D_%lu-num_%lu-bitlen_%lu.txt";
   const string improved_format = "/root/mvrp/static/improved/%s-N_%lu-D_%lu-num_%lu-bitlen_%lu.txt";
@@ -81,14 +79,14 @@ int main(int argc,char *argv[]) {
       
       std::vector<Fr>     set_values_vec(num);
       std::vector<size_t> indexs(num);
-      std::vector<Range>  range_vec(num);
+      std::vector<CRange>  range_vec(num);
       for(j = 0; j < num; j++) {
           set_values_vec[j] = Fr::one() + Fr::one();
           indexs[j] = j+1;
-          range_vec[j] = Range(Fr::zero(), -Fr::one(), bit_len);
+          range_vec[j] = CRange(Fr::zero(), -Fr::one(), bit_len);
       }
-      auto set      = SET(set_values_vec);
-      auto ranges   = Ranges(indexs, range_vec);
+      auto set      = CSet(set_values_vec);
+      auto ranges   = CRanges(indexs, range_vec);
 
       auto u = Fr::random_element() * G1::one();
       auto ipa_sys = IPAProveSystem(u);
@@ -101,10 +99,10 @@ int main(int argc,char *argv[]) {
       agenda = Agenda(mode, N, D, num, bit_len);
       for(j = 0; j < repeat; j++) {
         pi = prover.prove(agenda, false);
-        result = verifier.verify(pi, agenda, false);
+        result &= verifier.verify(pi, agenda, false);
       }
       agenda.print();
-      agenda.write_file(file_name);
+      // agenda.write_file(file_name);
       base_record += agenda.to_string_rough();
       ipa_record  += agenda.ipa_record();
 
@@ -113,10 +111,10 @@ int main(int argc,char *argv[]) {
       agenda = Agenda(mode, N, D, num, bit_len);
       for(size_t i = 0; i < repeat; i++) {
         pi = prover.prove(agenda, true);
-        result = verifier.verify(pi, agenda, true);
+        result &= verifier.verify(pi, agenda, true);
       }
       agenda.print();
-      agenda.write_file(file_name);
+      // agenda.write_file(file_name);
       improved_record += agenda.to_string_rough();
     }
   }
@@ -132,5 +130,7 @@ int main(int argc,char *argv[]) {
   write_file(improved_file, improved_record);
 
   std::cout << "output OK:>" << endl;
+  std::cout << "result: " << result << std::endl;
+  return (int)(!result);
 }
 

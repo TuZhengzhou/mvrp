@@ -7,17 +7,17 @@
 #include "libff/algebra/fields/field_utils.hpp"
 #include "libff/common/utils.hpp"
 #include "structs.hpp"
-#include "ipa.hpp"
+#include "range.hpp"
 
 namespace cred {
 
 class Prover{
 public:
-  CredSRS _srs; // srs
-  SET _S;   // set S
+  CCredSRS _srs; // srs
+  CSet _S;   // set S
   G1 _C;    // commitment C
   Fr _r;    // random r for commitment C
-  Ranges _ranges;
+  CRanges _ranges;
   IPAProveSystem _ipa_prove_sys;
 
   size_t _D;    // D = sum_(j in I) n_(j)
@@ -27,11 +27,11 @@ public:
   std::vector<G1> _point_proofs;
 
   Prover() {};
-  Prover(const CredSRS& srs, const SET& S, const Ranges& ranges, const IPAProveSystem& ipa_sys);
+  Prover(const CCredSRS& srs, const CSet& S, const CRanges& ranges, const IPAProveSystem& ipa_sys);
 
-  CredProof prove(Agenda& agenda, const bool improved=true);
-  CredProof prove_base(Agenda& agenda);
-  CredProof prove_improved(Agenda& agenda);
+  CRangeProof prove(Agenda& agenda, const bool improved=true);
+  CRangeProof prove_base(Agenda& agenda);
+  CRangeProof prove_improved(Agenda& agenda);
   
 private:
   inline const G1& point_proof(size_t idx);

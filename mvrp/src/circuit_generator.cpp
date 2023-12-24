@@ -2,7 +2,7 @@
 #include <vector>
 #include "libff/common/utils.hpp"
 #include "libff/algebra/curves/public_params.hpp"
-#include "structs.hpp"
+#include "basic_types.hpp"
 #include "circuit_generator.hpp"
 
 /**
@@ -44,64 +44,90 @@ using namespace std;
 
 namespace cred {
 
-CircuitParaGenerator::CircuitParaGenerator(const size_t n, const size_t m) {
-  // using cred::G1;
-  // using cred::G2;
-  // using cred::GT;
-  // using cred::Fr;
-  this->n = n;
-  this->m = m;
+CircuitParaGenerator::CircuitParaGenerator(const size_t num_multi_gates, const size_t num_commit_input) {
+
+  this->num_multi_gates_ = num_multi_gates;
+  this->num_commit_input_ = num_commit_input;
+  this->num_constraints_ = num_multi_gates + num_commit_input - 1;
+
   size_t i;
-  a_L.resize(n);
-  a_R.resize(n);
-  a_O.resize(n);
+  a_L.resize(this->num_multi_gates_);
+  a_R.resize(this->num_multi_gates_);
+  a_O.resize(this->num_multi_gates_);
 
   /** set random initial values*/
   a_L[0] = Fr::random_element();
-  for(i = 0; i < n; i++) {
+  for(i = 0; i < this->num_multi_gates_; i++) {
     a_R[i] = Fr::random_element();
   }
 
   /** evaluate the circuit */
-  for(i = 0; i < n; i++) {
+  for(i = 0; i < this->num_multi_gates_; i++) {
     a_O[i] = a_L[i] * a_R[i];
-    if(i < n-1)
+    if(i < this->num_multi_gates_-1)
       a_L[i+1] = a_O[i];
   }
 
   /** set the value of v */
-  v.resize(m);
-  for(i = 0; i < m; i++) {
+  v.resize(this->num_commit_input_);
+  for(i = 0; i < this->num_commit_input_; i++) {
     v[i] = a_R[i];
   }
   
   /** generate the constraint matrix */
-  W_L = vector<vector<Fr>>(n+m-1, vector<Fr>(n, Fr::zero()));
-  W_R = vector<vector<Fr>>(n+m-1, vector<Fr>(n, Fr::zero()));
-  W_O = vector<vector<Fr>>(n+m-1, vector<Fr>(n, Fr::zero()));
-  W_V = vector<vector<Fr>>(n+m-1, vector<Fr>(m, Fr::zero()));
-  c   = vector<Fr>(n+m-1, Fr::zero());
-  for(i = 0; i < m; i++) {
-    W_R[i][i] = Fr::one();
-    W_V[i][i] = Fr::one();
-  }
-  for(i = 0; i < n-1; i++) {
-    W_L[m+i][i+1] = Fr::one();
-    W_O[m+i][i]   = - Fr::one();
-  }
-#ifdef CRED_DEBUG
-  assert(check());
+  constraints = vector<LinearCombination>(this->num_constraints_, LinearCombination());
 
+  for(i = 0; i < this->num_commit_input_; i++) {
+    constraints[i] += LinearCombination(Variable(VType::MultiplierRight, i), Fr(1));
+    constraints[i] += LinearCombination(Variable(VType::Committed, i), Fr(1));
+  }
+  for(i = 0; i < this->num_multi_gates_ - 1; i++) {
+    constraints[this->num_commit_input_ + i] += LinearCombination(Variable(VType::MultiplierLeft, i+1), Fr( 1));
+    constraints[this->num_commit_input_ + i] += LinearCombination(Variable(VType::MultiplierOutput, i), Fr(-1));
+  }
+
+#ifdef CRED_DEBUG
+
+  assert(check());
 #endif
 }
 
 bool CircuitParaGenerator::check() {
   bool ret = true;
-  ret &= vector_all_zero(vector_sub(a_O, hadmard_product(a_L, a_R)));
-  for(size_t i = 0; i < n+m-1; i++) {
-    Fr cal_result = inner_product(W_L[i], a_L) + inner_product(W_R[i], a_R) + inner_product(W_O[i], a_O) \
-                    - inner_product(W_V[i], v) - c[i];
-    ret &= (cal_result == Fr::zero());
+
+  Fr z = Fr::random_element();
+
+  for (auto lc: this->constraints) {
+    Fr sum = Fr(0);
+    cout << lc.toString() << endl;
+    for (auto term: lc.terms) {
+      switch (term.first.type)
+      {
+      case VType::MultiplierLeft:
+        sum += a_L[term.first.index] * term.second;
+        break;
+      
+      case VType::MultiplierRight:
+        sum += a_R[term.first.index] * term.second;
+        break;
+      
+      case VType::MultiplierOutput:
+        sum += a_O[term.first.index] * term.second;
+        break;
+
+      case VType::Committed:
+        sum -= v[term.first.index] * term.second;
+        break;
+      
+      case VType::One:
+        sum -= term.second;
+        break;
+      
+      default:
+        break;
+      }
+    }
+    ret &= (sum == Fr(0));
   }
   return ret;
 }

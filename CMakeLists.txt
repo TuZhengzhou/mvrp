@@ -6,6 +6,15 @@ endif (POLICY CMP0048)
 project(mvrp)
 SET(PROJECT_VERSION 1.2.3.4)
 
+
+set(
+  CURVE
+  "BN128"
+  CACHE
+  STRING
+  "Default curve: one of ALT_BN128, BN128, EDWARDS, MNT4, MNT6"
+)
+
 add_definitions(
   -DCURVE_BN128
 )
